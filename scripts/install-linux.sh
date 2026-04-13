@@ -234,7 +234,9 @@ run_publish() {
 }
 
 backup_existing_state() {
-    [[ -d "$APP_DIR" ]] || return
+    if [[ ! -d "$APP_DIR" ]]; then
+        return 0
+    fi
 
     local entries=(
         "local-settings.json"
