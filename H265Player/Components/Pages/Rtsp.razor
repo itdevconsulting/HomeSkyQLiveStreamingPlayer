@@ -1,0 +1,276 @@
+@page "/rtsp"
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+@inject LocalSetupStore LocalSetupStore
+
+<PageTitle>RTSP</PageTitle>
+
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Managed RTSP</p>
+            <h1>RTSP Stream</h1>
+            <p class="lede">This page takes an RTSP URL, starts FFmpeg server-side, and plays the generated browser-friendly HLS output.</p>
+        </div>
+        <PageInfo Title="Managed RTSP" Summary="Use this page when the source is RTSP and the browser needs a server-side conversion layer." Items="HelpItems" />
+    </div>
+
+    <div class="control-grid">
+        <label class="field">
+            <span>RTSP URL</span>
+            <input type="url" @bind="Settings.InputUrl" spellcheck="false" />
+        </label>
+
+        <label class="field">
+            <span>Recent Streams</span>
+            <select @onchange="OnRecentChanged">
+                <option value="">Select recent stream</option>
+                @foreach (var recent in RecentStreams)
+                {
+                    <option value="@recent">@recent</option>
+                }
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Video codec</span>
+            <select @bind="Settings.VideoCodec">
+                <option value="libx264">libx264</option>
+                <option value="libx265">libx265</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Preset</span>
+            <select @bind="Settings.Preset">
+                <option value="browser-safe-h264">Browser-safe H.264</option>
+                <option value="browser-safe-h265">Browser-safe H.265</option>
+                <option value="low-latency-h264">Low-latency H.264</option>
+                <option value="copy-video">Copy video</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Audio mode</span>
+            <select @bind="Settings.AudioMode">
+                <option value="none">No audio</option>
+                <option value="aac">AAC transcode</option>
+                <option value="copy">Copy audio</option>
+            </select>
+        </label>
+    </div>
+
+    <div class="toggle-grid">
+        <label class="check">
+            <input type="checkbox" @bind="Settings.AutoRestart" />
+            <span>Auto-restart FFmpeg</span>
+        </label>
+        <label class="check">
+            <input type="checkbox" @bind="Settings.AutoPlay" />
+            <span>Auto-play player</span>
+        </label>
+    </div>
+
+    <div class="toolbar">
+        <button type="button" @onclick="GoAsync">Go</button>
+        <button type="button" @onclick="SaveAsPreset">Save As Preset</button>
+    </div>
+
+    <div class="status-grid">
+        <div>
+            <span class="label">App Base URL</span>
+            <code>@NavigationManager.BaseUri</code>
+        </div>
+        <div>
+            <span class="label">Manifest URL</span>
+            <code>@ManifestUrl</code>
+        </div>
+        <div>
+            <span class="label">Transcoder state</span>
+            <code>@TranscoderStatus</code>
+        </div>
+        <div>
+            <span class="label">Player state</span>
+            <code>@PlayerStatus</code>
+        </div>
+    </div>
+</section>
+
+<section class="player-panel">
+    <div id="rtsp-player-host" class="player-host"></div>
+    <pre class="log">@LogText</pre>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "Enter an RTSP URL that FFmpeg can open from the server running this app.",
+        "Video codec chooses the output encoder: libx264 is the compatibility-first option, while libx265 keeps HEVC if the downstream browser path supports it.",
+        "Preset controls how aggressively FFmpeg reshapes the output for browser playback. Browser-safe options prioritize compatibility, while low-latency H.264 reduces delay.",
+        "Audio mode controls whether audio is dropped, transcoded to AAC, or passed through unchanged.",
+        "Go restarts the managed FFmpeg pipeline with the RTSP input and loads the generated HLS output in the page.",
+        "This page uses the stored FFmpeg executable path from server settings; it does not expect you to enter the binary path here.",
+        "Use Auto-restart when the camera or encoder is expected to drop occasionally and you want the server to reconnect on its own.",
+        "If the source fails before a manifest appears, the log panel is the place to read the actual FFmpeg error."
+    ];
+
+    private FfmpegSettings Settings { get; set; } = new()
+    {
+        InputUrl = "rtsp://192.168.15.169/hd"
+    };
+    private string ManifestUrl { get; set; } = "/live/stream.m3u8";
+    private string TranscoderStatus { get; set; } = "Idle";
+    private string PlayerStatus { get; set; } = "Idle";
+    private string LogText { get; set; } = string.Empty;
+    private List<string> RecentStreams { get; set; } = [];
+
+    protected override void OnInitialized()
+    {
+        if (!LocalSetupStore.IsConfigured())
+        {
+            NavigationManager.NavigateTo($"/setup?returnUrl={Uri.EscapeDataString("/rtsp")}");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !LocalSetupStore.IsConfigured())
+        {
+            return;
+        }
+
+        await LoadFfmpegPathAsync();
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.getRecentStreams", "rtsp");
+        ManifestUrl = $"{NavigationManager.BaseUri.TrimEnd('/')}/live/stream.m3u8";
+        StateHasChanged();
+    }
+
+    private async Task LoadFfmpegPathAsync()
+    {
+        var setupResponse = await JS.InvokeAsync<ApiEnvelope<LocalSetupSettings>>("h265Auth.fetchJson", "/api/setup");
+        var settingsResponse = await JS.InvokeAsync<ApiEnvelope<FfmpegSettings>>("h265Auth.fetchJson", "/api/settings");
+        var setup = setupResponse.Json;
+        var settings = settingsResponse.Json;
+        if (!string.IsNullOrWhiteSpace(setup?.DefaultRtspStreamUrl) && string.IsNullOrWhiteSpace(Settings.InputUrl))
+        {
+            Settings.InputUrl = setup.DefaultRtspStreamUrl;
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings?.FfmpegPath))
+        {
+            Settings.FfmpegPath = settings.FfmpegPath;
+        }
+    }
+
+    private async Task GoAsync()
+    {
+        if (!EnsureFfmpegConfigured())
+        {
+            return;
+        }
+
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.pushRecentStream", "rtsp", Settings.InputUrl);
+
+        var response = await JS.InvokeAsync<ApiEnvelope<TranscoderStatusResponse>>("h265Auth.fetchJson", "/api/transcoder/start", new
+        {
+            method = "POST",
+            body = System.Text.Json.JsonSerializer.Serialize(new StartRequest { Settings = Settings })
+        });
+        if (!response.Ok)
+        {
+            TranscoderStatus = $"Start failed ({response.Status})";
+            PlayerStatus = "Idle";
+            LogText = response.Text;
+            return;
+        }
+
+        ApplyStatus(response.Json);
+
+        await JS.InvokeVoidAsync("h265App.rtspLoad", "/live/stream.m3u8", Settings.AutoPlay, Settings.AudioMode == "none");
+        PlayerStatus = "Loading";
+    }
+
+    private void ApplyStatus(TranscoderStatusResponse? status)
+    {
+        if (status is null)
+        {
+            return;
+        }
+
+        ManifestUrl = $"{NavigationManager.BaseUri.TrimEnd('/')}{status.ManifestUrl}";
+        TranscoderStatus = status.IsRunning
+            ? $"Running ({status.Settings?.Preset ?? status.Settings?.VideoCodec ?? "active"})"
+            : "Stopped";
+        LogText = status.Logs is { Count: > 0 } ? string.Join(Environment.NewLine, status.Logs) : string.Empty;
+    }
+
+    private bool EnsureFfmpegConfigured()
+    {
+        if (!string.IsNullOrWhiteSpace(Settings.FfmpegPath))
+        {
+            return true;
+        }
+
+        NavigationManager.NavigateTo($"/setup?returnUrl={Uri.EscapeDataString("/rtsp")}");
+        TranscoderStatus = "FFmpeg path missing";
+        PlayerStatus = "Idle";
+        LogText = "FFmpeg is not configured. Open Setup and save a valid ffmpeg.exe path.";
+        return false;
+    }
+
+    private Task OnRecentChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            Settings.InputUrl = value;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void SaveAsPreset()
+    {
+        var target =
+            $"/presets?sourceType=rtsp&streamUrl={Uri.EscapeDataString(Settings.InputUrl)}" +
+            $"&videoCodec={Uri.EscapeDataString(Settings.VideoCodec)}" +
+            $"&preset={Uri.EscapeDataString(Settings.Preset)}" +
+            $"&audioMode={Uri.EscapeDataString(Settings.AudioMode)}" +
+            $"&autoRestart={Settings.AutoRestart}" +
+            $"&autoPlay={Settings.AutoPlay}";
+        NavigationManager.NavigateTo(target);
+    }
+
+    private sealed class StartRequest
+    {
+        public FfmpegSettings Settings { get; set; } = new();
+    }
+
+    private sealed class ApiEnvelope<T>
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public T? Json { get; set; }
+    }
+
+    private sealed class TranscoderStatusResponse
+    {
+        public bool IsRunning { get; set; }
+        public string ManifestUrl { get; set; } = "/live/stream.m3u8";
+        public FfmpegSettings? Settings { get; set; }
+        public List<string> Logs { get; set; } = [];
+    }
+
+    private sealed class FfmpegSettings
+    {
+        public string FfmpegPath { get; set; } = string.Empty;
+        public string InputUrl { get; set; } = string.Empty;
+        public string VideoCodec { get; set; } = "libx264";
+        public string Preset { get; set; } = "browser-safe-h264";
+        public string AudioMode { get; set; } = "aac";
+        public bool AutoRestart { get; set; } = true;
+        public bool AutoPlay { get; set; } = true;
+        public bool AutoStart { get; set; }
+    }
+}

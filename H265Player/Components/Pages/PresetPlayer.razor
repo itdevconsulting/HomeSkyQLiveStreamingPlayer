@@ -1,0 +1,325 @@
+@page "/preset/{Id:guid}"
+@implements IDisposable
+@inject IJSRuntime JS
+@inject DirectSkyQPresetStore PresetStore
+@inject SkyQService SkyQService
+@inject NavigationManager NavigationManager
+@inject LocalSetupStore LocalSetupStore
+
+<PageTitle>Preset Player</PageTitle>
+
+@if (_preset is null)
+{
+    <section class="panel">
+        <p class="eyebrow">Preset</p>
+        <h1>Preset Not Found</h1>
+        <p class="lede">The requested preset does not exist.</p>
+    </section>
+}
+else
+{
+    <section class="panel">
+        <div class="preset-header">
+            <div>
+                <h2 class="preset-title">@_preset.Name</h2>
+            </div>
+            <PageInfo Title="Preset Player" Summary="This page opens the saved source type and binds it to the selected Sky Q box." Items="HelpItems" />
+        </div>
+    </section>
+
+    @if (RequiresSetup)
+    {
+        <section class="panel">
+            <div class="setup-status missing">
+                <strong>FFmpeg setup required</strong>
+                <span>This preset uses the managed @_preset.SourceType.ToUpperInvariant() path. Configure FFmpeg before starting it.</span>
+            </div>
+            <div class="toolbar">
+                <button type="button" @onclick="OpenSetup">Open setup</button>
+            </div>
+        </section>
+    }
+    else
+    {
+    <section class="player-panel preset-player-panel">
+        <div class="preset-icon-row">
+            <div class="preset-icon-group preset-icon-group-left">
+                <button type="button" class="preset-icon-button preset-icon-button-play" @onclick="GoAsync" title="Play">
+                    <span class="play-icon" aria-hidden="true"></span>
+                </button>
+                <SkyQMiniRemote Title="@RemoteTitle" ButtonCssClass="preset-icon-button preset-icon-button-remote" OnCommand="SendCommandAsync">
+                    <ButtonContent>
+                        <span class="remote-icon" aria-hidden="true">
+                            <span class="remote-icon-screen"></span>
+                            <span class="remote-icon-pad"></span>
+                        </span>
+                    </ButtonContent>
+                </SkyQMiniRemote>
+            </div>
+
+            <div class="preset-icon-group preset-icon-group-right">
+                <button type="button" class="@GetSizeButtonClass("small")" @onclick="SetSmallVideo" title="Small video">
+                    <span class="size-icon size-icon-small" aria-hidden="true"></span>
+                </button>
+                <button type="button" class="@GetSizeButtonClass("medium")" @onclick="SetMediumVideo" title="Medium video">
+                    <span class="size-icon size-icon-medium" aria-hidden="true"></span>
+                </button>
+                <button type="button" class="@GetSizeButtonClass("large")" @onclick="SetLargeVideo" title="Large video">
+                    <span class="size-icon size-icon-large" aria-hidden="true"></span>
+                </button>
+            </div>
+        </div>
+
+        <div class="preset-video-shell @($"preset-video-{_videoSize}")">
+            <div id="preset-managed-host" class="player-host" style="@ManagedHostStyle"></div>
+            <video id="preset-player-host" class="video-host" style="@VideoHostStyle" controls playsinline></video>
+        </div>
+        <div class="preset-meta">
+            <span><strong>@_preset.SourceType.ToUpperInvariant()</strong></span>
+            <span>@RemoteTitle</span>
+            <span>@_status</span>
+            <span>@_lastCommand</span>
+            <span class="preset-meta-url">@_preset.StreamUrl</span>
+        </div>
+    </section>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "Go tears down any existing player on this screen and starts the saved source again using its configured source type.",
+        "Direct presets use the raw TS browser path, HLS presets use the HLS browser path, and FFmpeg or RTSP presets restart the managed transcoder before playing the output.",
+        "Remote opens a draggable mini Sky Q remote tied to the saved box for this preset.",
+        "When the remote is open and focused, number keys send digits, cursor keys navigate, Enter selects, and Space sends pause.",
+        "Edit names, stream URLs, or box associations on the Presets page."
+    ];
+
+    private DirectSkyQPreset? _preset;
+    private string _status = "Idle";
+    private string _logText = string.Empty;
+    private string _lastCommand = "None";
+    private string _videoSize = "medium";
+    private string _managedHostStyle = "display:none";
+    private string _videoHostStyle = "";
+    private bool _pendingAutoLoad;
+    private DotNetObjectReference<PresetPlayer>? _dotNetRef;
+    private bool RequiresSetup => _preset is { SourceType: "ffmpeg" or "rtsp" } && !LocalSetupStore.IsConfigured();
+
+    private string RemoteTitle =>
+        _preset is null
+            ? "Sky Q"
+            : string.IsNullOrWhiteSpace(_preset.SkyQHostName)
+                ? _preset.SkyQHost
+                : $"{_preset.SkyQHostName} ({_preset.SkyQHost})";
+
+    private string ManagedHostStyle => _managedHostStyle;
+    private string VideoHostStyle => _videoHostStyle;
+
+    protected override void OnParametersSet()
+    {
+        _preset = PresetStore.Get(Id);
+        _pendingAutoLoad = _preset is not null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_preset is null || !_pendingAutoLoad || RequiresSetup)
+        {
+            return;
+        }
+
+        _dotNetRef ??= DotNetObjectReference.Create(this);
+        _pendingAutoLoad = false;
+        await GoAsync();
+    }
+
+    private async Task GoAsync()
+    {
+        if (_preset is null || RequiresSetup)
+        {
+            return;
+        }
+
+        await ReleaseAsync();
+        _logText = string.Empty;
+
+        switch (_preset.SourceType)
+        {
+            case "hls":
+                _managedHostStyle = "display:none";
+                _videoHostStyle = "";
+                var hlsResult = await JS.InvokeAsync<HlsLoadResult>("h265App.hlsLoadToElement", "preset-player-host", _preset.StreamUrl, _preset.UseHlsProxy);
+                _status = hlsResult.Status;
+                _logText = $"Starting {hlsResult.ResolvedUrl}";
+                break;
+
+            case "ffmpeg":
+            case "rtsp":
+                _managedHostStyle = "";
+                _videoHostStyle = "display:none";
+                await StartManagedPresetAsync();
+                break;
+
+            default:
+                _managedHostStyle = "display:none";
+                _videoHostStyle = "";
+                var directResult = await JS.InvokeAsync<DirectLoadResult>("h265App.directLoadToElement", "preset-player-host", _preset.StreamUrl, _dotNetRef);
+                _status = directResult.Status;
+                _logText = $"Starting {directResult.ProxyUrl}";
+                break;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task StartManagedPresetAsync()
+    {
+        if (_preset is null || RequiresSetup)
+        {
+            return;
+        }
+
+        var request = new StartRequest
+        {
+            Settings = new FfmpegSettings
+            {
+                InputUrl = _preset.StreamUrl,
+                VideoCodec = string.IsNullOrWhiteSpace(_preset.VideoCodec) ? "libx264" : _preset.VideoCodec,
+                Preset = string.IsNullOrWhiteSpace(_preset.Preset) ? "browser-safe-h264" : _preset.Preset,
+                AudioMode = string.IsNullOrWhiteSpace(_preset.AudioMode) ? "none" : _preset.AudioMode,
+                AutoRestart = _preset.AutoRestart,
+                AutoPlay = _preset.AutoPlay,
+                AutoStart = false
+            }
+        };
+
+        var storedSettingsResponse = await JS.InvokeAsync<ApiEnvelope<FfmpegSettings>>("h265Auth.fetchJson", "/api/settings");
+        var storedSettings = storedSettingsResponse.Json;
+        request.Settings.FfmpegPath = storedSettings?.FfmpegPath ?? string.Empty;
+
+        var response = await JS.InvokeAsync<ApiEnvelope<TranscoderStatusResponse>>("h265Auth.fetchJson", "/api/transcoder/start", new
+        {
+            method = "POST",
+            body = System.Text.Json.JsonSerializer.Serialize(request)
+        });
+        if (!response.Ok)
+        {
+            _status = $"Start failed ({response.Status})";
+            _logText = response.Text;
+            return;
+        }
+
+        var status = response.Json;
+        _status = status?.IsRunning == true ? "Running" : "Stopped";
+        _logText = status?.Logs is { Count: > 0 } ? string.Join(Environment.NewLine, status.Logs) : "Managed stream started";
+        await JS.InvokeVoidAsync("h265App.managedLoadToHost", "preset-managed-host", "/live/stream.m3u8", _preset.AutoPlay, _preset.AudioMode == "none");
+    }
+
+    private async Task ReleaseAsync()
+    {
+        await JS.InvokeVoidAsync("h265App.directReleaseElement", "preset-player-host");
+        await JS.InvokeVoidAsync("h265App.hlsReleaseElement", "preset-player-host");
+        await JS.InvokeVoidAsync("h265App.managedReleaseHost", "preset-managed-host");
+    }
+
+    private async Task SendCommandAsync(string command)
+    {
+        if (_preset is null)
+        {
+            return;
+        }
+
+        var result = await SkyQService.SendCommandAsync(_preset.SkyQHost, command, CancellationToken.None);
+        _lastCommand = command;
+        _logText = string.Join(Environment.NewLine, new[] { result.Message }.Concat(result.Logs));
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenSetup()
+    {
+        NavigationManager.NavigateTo($"/setup?returnUrl={Uri.EscapeDataString($"/preset/{Id}")}");
+    }
+
+    private void SetVideoSize(string size)
+    {
+        _videoSize = size;
+    }
+
+    private void SetSmallVideo() => SetVideoSize("small");
+
+    private void SetMediumVideo() => SetVideoSize("medium");
+
+    private void SetLargeVideo() => SetVideoSize("large");
+
+    private string GetSizeButtonClass(string size) =>
+        _videoSize == size ? "preset-icon-button preset-size-button active" : "preset-icon-button preset-size-button";
+
+    [JSInvokable]
+    public Task OnDirectStatusChanged(string status)
+    {
+        _status = status;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnDirectLog(string message)
+    {
+        _logText = string.IsNullOrWhiteSpace(_logText)
+            ? message
+            : $"{_logText}{Environment.NewLine}{message}";
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        _dotNetRef?.Dispose();
+    }
+
+    private sealed class DirectLoadResult
+    {
+        public string ProxyUrl { get; set; } = string.Empty;
+        public string Status { get; set; } = "Idle";
+    }
+
+    private sealed class HlsLoadResult
+    {
+        public string ResolvedUrl { get; set; } = string.Empty;
+        public string Framework { get; set; } = "Idle";
+        public string Status { get; set; } = "Idle";
+    }
+
+    private sealed class StartRequest
+    {
+        public FfmpegSettings Settings { get; set; } = new();
+    }
+
+    private sealed class ApiEnvelope<T>
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public T? Json { get; set; }
+    }
+
+    private sealed class TranscoderStatusResponse
+    {
+        public bool IsRunning { get; set; }
+        public List<string> Logs { get; set; } = [];
+    }
+
+    private sealed class FfmpegSettings
+    {
+        public string FfmpegPath { get; set; } = string.Empty;
+        public string InputUrl { get; set; } = string.Empty;
+        public string VideoCodec { get; set; } = "libx264";
+        public string Preset { get; set; } = "browser-safe-h264";
+        public string AudioMode { get; set; } = "none";
+        public bool AutoRestart { get; set; } = true;
+        public bool AutoPlay { get; set; } = true;
+        public bool AutoStart { get; set; }
+    }
+}

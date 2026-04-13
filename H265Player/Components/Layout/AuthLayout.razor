@@ -1,0 +1,25 @@
+@inherits LayoutComponentBase
+
+<style>
+    .auth-layout-shell {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 1rem;
+        background:
+            radial-gradient(circle at top, rgba(137, 209, 133, 0.14), transparent 30%),
+            linear-gradient(180deg, #12181e 0%, #0a0f13 100%);
+        color: #edf2f7;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .auth-layout-content {
+        width: min(100%, 820px);
+    }
+</style>
+
+<div class="auth-layout-shell">
+    <main class="auth-layout-content">
+        @Body
+    </main>
+</div>

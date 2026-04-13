@@ -1,0 +1,50 @@
+<div class="info-button-shell">
+    <button type="button" class="info-button" @onclick="Open">Info</button>
+</div>
+
+@if (_isOpen)
+{
+    <div class="info-modal-backdrop" @onclick="Close">
+        <div class="info-modal" @onclick:stopPropagation="true">
+            <div class="info-modal-header">
+                <div>
+                    <p class="eyebrow">Page Help</p>
+                    <h2>@Title</h2>
+                </div>
+                <button type="button" class="info-modal-close" @onclick="Close">Close</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(Summary))
+            {
+                <p class="lede">@Summary</p>
+            }
+
+            @if (Items is { Count: > 0 })
+            {
+                <ul class="info-list">
+                    @foreach (var item in Items)
+                    {
+                        <li>@item</li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isOpen;
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Summary { get; set; } = string.Empty;
+
+    [Parameter]
+    public IReadOnlyList<string> Items { get; set; } = [];
+
+    private void Open() => _isOpen = true;
+
+    private void Close() => _isOpen = false;
+}

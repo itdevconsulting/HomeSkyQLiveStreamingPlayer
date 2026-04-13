@@ -1,0 +1,137 @@
+@page "/direct"
+@implements IDisposable
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+
+<PageTitle>Direct</PageTitle>
+
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Direct Decoder</p>
+            <h1>Direct Stream</h1>
+            <p class="lede">This is the earlier direct browser path. It proxies the raw stream through this app and feeds it to `h265web.js`.</p>
+        </div>
+        <PageInfo Title="Direct Stream" Summary="Use this page for raw HTTP transport tests where you want to proxy the source through this app and play it directly in the browser." Items="HelpItems" />
+    </div>
+    <label class="field">
+        <span>Source URL</span>
+        <input id="direct-stream-url" type="url" @bind="StreamUrl" spellcheck="false" />
+    </label>
+    <label class="field">
+        <span>Recent Streams</span>
+        <select @onchange="OnRecentChanged">
+            <option value="">Select recent stream</option>
+            @foreach (var recent in RecentStreams)
+            {
+                <option value="@recent">@recent</option>
+            }
+        </select>
+    </label>
+    <div class="toolbar">
+        <button id="direct-load-button" type="button" @onclick="GoAsync">Go</button>
+        <button type="button" @onclick="SaveAsPreset">Save As Preset</button>
+    </div>
+    <div class="status-grid">
+        <div>
+            <span class="label">App Base URL</span>
+            <code>@NavigationManager.BaseUri</code>
+        </div>
+        <div>
+            <span class="label">Proxy URL</span>
+            <code id="direct-proxy-url">@ProxyUrl</code>
+        </div>
+        <div>
+            <span class="label">State</span>
+            <code id="direct-status">@Status</code>
+        </div>
+    </div>
+</section>
+
+<section class="player-panel">
+    <video id="direct-player-host" class="video-host" controls playsinline></video>
+    <pre id="direct-log" class="log">@LogText</pre>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "Enter a raw HTTP stream URL, usually an MPEG-TS endpoint from an encoder.",
+        "Go tears down any existing direct player, updates the recent stream list, rebuilds the proxy URL, and starts the browser player again.",
+        "Proxy URL shows the exact server-side URL being used so you can test it independently if needed.",
+        "State and log output are the first places to check if VLC works but the browser path does not.",
+        "Use HLS or FFmpeg instead if the encoder works in VLC but the raw TS browser path is unstable."
+    ];
+
+    private string StreamUrl { get; set; } = "http://192.168.15.169/hd.ts";
+    private string ProxyUrl { get; set; } = "Not loaded";
+    private string Status { get; set; } = "Idle";
+    private string LogText { get; set; } = string.Empty;
+    private List<string> RecentStreams { get; set; } = [];
+    private DotNetObjectReference<Direct>? _dotNetRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _dotNetRef = DotNetObjectReference.Create(this);
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.getRecentStreams", "direct");
+        StateHasChanged();
+    }
+
+    private async Task GoAsync()
+    {
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.pushRecentStream", "direct", StreamUrl);
+        var result = await JS.InvokeAsync<DirectLoadResult>("h265App.directLoad", StreamUrl, _dotNetRef);
+        ProxyUrl = $"{NavigationManager.BaseUri.TrimEnd('/')}{result.ProxyUrl}";
+        Status = result.Status;
+        LogText = $"Starting {result.ProxyUrl}";
+    }
+
+    private Task OnRecentChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            StreamUrl = value;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnDirectStatusChanged(string status)
+    {
+        Status = status;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnDirectLog(string message)
+    {
+        LogText = string.IsNullOrWhiteSpace(LogText)
+            ? message
+            : $"{LogText}{Environment.NewLine}{message}";
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        _dotNetRef?.Dispose();
+    }
+
+    private void SaveAsPreset()
+    {
+        var target = $"/presets?sourceType=direct&streamUrl={Uri.EscapeDataString(StreamUrl)}";
+        NavigationManager.NavigateTo(target);
+    }
+
+    private sealed class DirectLoadResult
+    {
+        public string ProxyUrl { get; set; } = string.Empty;
+        public string Status { get; set; } = "Idle";
+    }
+}

@@ -1,0 +1,120 @@
+@page "/auth/login"
+@layout AuthLayout
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+
+<PageTitle>Login</PageTitle>
+
+<section class="panel auth-panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Authentication</p>
+            <h1>Authenticator Login</h1>
+            <p class="lede">External access requires a valid authenticator code. Trusted local, Tailscale, and loopback access bypass this check automatically.</p>
+        </div>
+    </div>
+
+    @if (Status is null)
+    {
+        <div class="setup-status missing">
+            <strong>Loading</strong>
+            <span>Checking access requirements.</span>
+        </div>
+    }
+    else if (Status.TrustedNetwork)
+    {
+        <div class="setup-status configured">
+            <strong>Trusted network</strong>
+            <span>Authenticator login is not required from this network. You can continue straight into the app.</span>
+        </div>
+        <div class="toolbar">
+            <button type="button" @onclick="ContinueAsync">Continue</button>
+        </div>
+    }
+    else if (!Status.AuthenticatorConfigured)
+    {
+        <div class="setup-status missing">
+            <strong>Authenticator not enrolled</strong>
+            <span>A trusted-network user must complete setup and register an authenticator before external logins can succeed.</span>
+        </div>
+    }
+    else
+    {
+        <div class="control-grid">
+            <label class="field">
+                <span>Email</span>
+                <input type="email" @bind="Email" spellcheck="false" autocomplete="username" />
+            </label>
+            <label class="field">
+                <span>Authenticator code</span>
+                <input type="text" @bind="Code" inputmode="numeric" autocomplete="one-time-code" />
+            </label>
+        </div>
+
+        <div class="toolbar">
+            <button type="button" @onclick="LoginAsync">Sign in</button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(ErrorText))
+    {
+        <div class="setup-inline-error">@ErrorText</div>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private AuthStatusResponse? Status { get; set; }
+    private string Email { get; set; } = string.Empty;
+    private string Code { get; set; } = string.Empty;
+    private string ErrorText { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var client = CreateClient();
+        Status = await client.GetFromJsonAsync<AuthStatusResponse>("/api/auth/status");
+        if (Status?.TrustedNetwork == true)
+        {
+            await ContinueAsync();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Status?.Email))
+        {
+            Email = Status.Email;
+        }
+    }
+
+    private HttpClient CreateClient() => new() { BaseAddress = new Uri(NavigationManager.BaseUri) };
+
+    private async Task LoginAsync()
+    {
+        ErrorText = string.Empty;
+        var result = await JS.InvokeAsync<AuthActionResult>("h265Auth.login", new AuthLoginRequest(Email, Code));
+        if (!result.Ok)
+        {
+            ErrorText = result.Text;
+            return;
+        }
+
+        await ContinueAsync(forceLoad: true);
+    }
+
+    private Task ContinueAsync() => ContinueAsync(forceLoad: false);
+
+    private Task ContinueAsync(bool forceLoad)
+    {
+        var target = !string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith('/') ? ReturnUrl : "/";
+        NavigationManager.NavigateTo(target, forceLoad: forceLoad);
+        return Task.CompletedTask;
+    }
+
+    private sealed class AuthActionResult
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+}

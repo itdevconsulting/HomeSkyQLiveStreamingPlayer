@@ -1,0 +1,128 @@
+@implements IDisposable
+@inject DirectSkyQPresetStore PresetStore
+@inject IHttpContextAccessor HttpContextAccessor
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+
+<aside class="nav-shell">
+    <div class="brand">
+        <span class="brand-kicker">Blazor Server</span>
+        <strong>H265 Player</strong>
+    </div>
+
+    <div class="nav-scroll">
+        <nav class="nav-links">
+            <NavLink class="nav-link-main" href="/" Match="NavLinkMatch.All">
+                <span class="nav-icon nav-icon-home" aria-hidden="true"></span>
+                <span>Home</span>
+            </NavLink>
+
+            <NavLink class="nav-link-main" href="/setup">
+                <span class="nav-icon nav-icon-setup" aria-hidden="true"></span>
+                <span>Setup</span>
+            </NavLink>
+
+            <div class="nav-group">
+                <button type="button" class="nav-group-toggle" @onclick="TogglePlayersExpanded" aria-expanded="@_playersExpanded">
+                    <span class="nav-group-label">Players</span>
+                    <span class="@GetChevronClass(_playersExpanded)" aria-hidden="true"></span>
+                </button>
+                <div class="@GetPlayersGroupClass()">
+                    <NavLink class="nav-link-sub" href="/direct">Direct</NavLink>
+                    <NavLink class="nav-link-sub" href="/ffmpeg">FFmpeg</NavLink>
+                    <NavLink class="nav-link-sub" href="/rtsp">RTSP</NavLink>
+                    <NavLink class="nav-link-sub" href="/hls">HLS</NavLink>
+                    <NavLink class="nav-link-sub" href="/engines">Engines</NavLink>
+                </div>
+            </div>
+
+            <NavLink class="nav-link-main" href="/skyq">
+                <span class="nav-icon nav-icon-remote" aria-hidden="true"></span>
+                <span>Sky Q</span>
+            </NavLink>
+
+            <NavLink class="nav-link-main" href="/presets">
+                <span class="nav-icon nav-icon-grid" aria-hidden="true"></span>
+                <span>Preset Manager</span>
+            </NavLink>
+        </nav>
+
+        @if (_isAuthenticated && !_isTrusted)
+        {
+            <div class="nav-auth-block">
+                <span class="brand-kicker">Session</span>
+                <span class="nav-session-user">@_userName</span>
+                <button type="button" class="nav-inline-button" @onclick="LogoutAsync">Logout</button>
+            </div>
+        }
+
+        <div class="nav-presets">
+            <span class="brand-kicker">Presets</span>
+            @if (_presets.Count == 0)
+            {
+                <span class="nav-preset-empty">No saved presets</span>
+            }
+            else
+            {
+                @foreach (var preset in _presets)
+                {
+                    <NavLink class="nav-preset-link" href="@($"/preset/{preset.Id}")">@preset.Name</NavLink>
+                }
+            }
+        </div>
+    </div>
+</aside>
+
+@code {
+    private IReadOnlyList<DirectSkyQPreset> _presets = [];
+    private bool _isTrusted;
+    private bool _isAuthenticated;
+    private string _userName = string.Empty;
+    private bool _playersExpanded = true;
+
+    protected override void OnInitialized()
+    {
+        var context = HttpContextAccessor.HttpContext;
+        if (context is not null)
+        {
+            _isTrusted = TrustedNetworkService.IsTrustedAddress(context.Connection.RemoteIpAddress);
+            _isAuthenticated = context.User.Identity?.IsAuthenticated == true;
+            _userName = context.User.Identity?.Name ?? string.Empty;
+        }
+
+        LoadPresets();
+        PresetStore.Changed += OnPresetsChanged;
+    }
+
+    private void LoadPresets()
+    {
+        _presets = PresetStore.GetAll();
+    }
+
+    private void OnPresetsChanged()
+    {
+        LoadPresets();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LogoutAsync()
+    {
+        await JS.InvokeVoidAsync("h265Auth.logout");
+        NavigationManager.NavigateTo("/auth/login", forceLoad: true);
+    }
+
+    private void TogglePlayersExpanded()
+    {
+        _playersExpanded = !_playersExpanded;
+    }
+
+    private string GetPlayersGroupClass() => _playersExpanded ? "nav-sub-links" : "nav-sub-links nav-sub-links-collapsed";
+
+    private static string GetChevronClass(bool expanded) =>
+        expanded ? "nav-group-chevron nav-group-chevron-expanded" : "nav-group-chevron";
+
+    public void Dispose()
+    {
+        PresetStore.Changed -= OnPresetsChanged;
+    }
+}

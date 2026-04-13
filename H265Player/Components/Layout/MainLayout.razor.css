@@ -1,0 +1,15 @@
+.shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.content-shell {
+    min-width: 0;
+}
+
+@media (max-width: 920px) {
+    .shell {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,395 @@
+@page "/setup"
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+
+<PageTitle>Setup</PageTitle>
+
+@if (_authStatus is not null && !_authStatus.TrustedNetwork)
+{
+    <section class="panel">
+        <div class="setup-status missing">
+            <strong>Trusted network required</strong>
+            <span>Setup and authenticator enrollment are only available from localhost, local private ranges, or Tailscale addresses.</span>
+        </div>
+    </section>
+}
+else
+{
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Setup</p>
+            <h1>Configure FFmpeg</h1>
+            <p class="lede">Managed playback uses FFmpeg to normalize awkward streams, transcode RTSP sources, and generate browser-friendly HLS output. This page also enrolls the authenticator used when the app is accessed from an external network.</p>
+        </div>
+        <PageInfo Title="Setup" Summary="Configure the local FFmpeg executable and optional machine defaults before using the managed playback pages." Items="HelpItems" />
+    </div>
+
+    <div class="setup-status @(!string.IsNullOrWhiteSpace(Settings.FfmpegPath) ? "configured" : "missing")">
+        <strong>@(!string.IsNullOrWhiteSpace(Settings.FfmpegPath) ? "FFmpeg configured" : "FFmpeg setup required")</strong>
+        <span>@StatusText</span>
+    </div>
+
+    <div class="control-grid">
+        <label class="field">
+            <span>FFmpeg executable</span>
+            <input type="text" @bind="Settings.FfmpegPath" spellcheck="false" placeholder="D:\ffmpeg\bin\ffmpeg.exe" />
+        </label>
+        <label class="field">
+            <span>Default HTTP stream URL</span>
+            <input type="url" @bind="Settings.DefaultHttpStreamUrl" spellcheck="false" placeholder="http://192.168.0.10/hd.ts" />
+        </label>
+        <label class="field">
+            <span>Default RTSP URL</span>
+            <input type="url" @bind="Settings.DefaultRtspStreamUrl" spellcheck="false" placeholder="rtsp://192.168.0.10/stream" />
+        </label>
+    </div>
+
+    <div class="toolbar">
+        <button type="button" @onclick="SaveAsync">Save setup</button>
+    </div>
+
+    <div class="setup-auth-grid">
+        <div class="panel-copy">
+            <p class="eyebrow">Authenticator</p>
+            <h2>External Access Login</h2>
+            <p class="lede">External requests are challenged with a TOTP code. Register the email address and scan the QR code from a trusted network only.</p>
+        </div>
+
+        <div class="control-grid">
+            <label class="field">
+                <span>Registered email</span>
+                <input type="email" @bind="Settings.AuthEmail" spellcheck="false" placeholder="you@example.com" />
+            </label>
+        </div>
+
+        <div class="toolbar">
+            <button type="button" @onclick="GenerateQrAsync">Generate QR code</button>
+        </div>
+
+        @if (_accounts.Count > 0)
+        {
+            <div class="setup-account-list">
+                <div class="label">Registered emails</div>
+                @foreach (var account in _accounts)
+                {
+                    <div class="setup-account-row">
+                        <div class="setup-account-copy">
+                            <strong>@account.Email</strong>
+                            <span>@(account.UpdatedAt is null ? "No timestamp" : $"Updated {account.UpdatedAt.Value.LocalDateTime:g}")</span>
+                        </div>
+                        <div class="setup-account-actions">
+                            <button type="button" @onclick="() => RegenerateQrAsync(account.Email)">Regenerate QR</button>
+                            <button type="button" class="danger-button" @onclick="() => DeleteAccountAsync(account.Email)">Delete</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_qrCodeDataUrl))
+        {
+            <div class="auth-enrollment-shell">
+                <img class="auth-qr-image" src="@_qrCodeDataUrl" alt="Authenticator QR code" />
+                <div class="auth-enrollment-copy">
+                    <div>
+                        <span class="label">Manual key</span>
+                        <code>@_manualKey</code>
+                    </div>
+                    <div>
+                        <span class="label">Account</span>
+                        <code>@Settings.AuthEmail</code>
+                    </div>
+                </div>
+                <div class="toolbar">
+                    <button type="button" @onclick="CopyQrAsync">Copy QR code</button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(ErrorText))
+    {
+        <div class="setup-inline-error">@ErrorText</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(SuccessText))
+    {
+        <div class="setup-inline-success">@SuccessText</div>
+    }
+</section>
+}
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "FFmpeg is only required for the managed playback paths: FFmpeg, RTSP, and any presets that use those source types.",
+        "Save setup validates the executable path immediately so the app fails here instead of later when you press Go.",
+        "Default HTTP stream URL is used as the starting value on managed HTTP pages when no saved runtime settings exist yet.",
+        "Default RTSP URL is used as the starting value on the RTSP page when no machine-specific setting has been saved yet.",
+        "Authenticator enrollment is only allowed from a trusted network. External access then requires the registered email address plus a current authenticator code.",
+        "This data is stored locally on disk in local-settings.json and auth-settings.json and should stay out of source control."
+    ];
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private SetupForm Settings { get; set; } = new();
+    private string StatusText { get; set; } = "Managed playback is blocked until FFmpeg is configured.";
+    private string ErrorText { get; set; } = string.Empty;
+    private string SuccessText { get; set; } = string.Empty;
+    private AuthStatusResponse? _authStatus;
+    private string _qrCodeDataUrl = string.Empty;
+    private string _manualKey = string.Empty;
+    private List<AuthAccountSummary> _accounts = [];
+
+    private bool _loaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded)
+        {
+            return;
+        }
+
+        _loaded = true;
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadAsync()
+    {
+        var authResponse = await JS.InvokeAsync<ApiEnvelope<AuthStatusResponse>>("h265Auth.fetchJson", "/api/auth/status");
+        if (authResponse.Ok)
+        {
+            _authStatus = authResponse.Json;
+        }
+        else
+        {
+            ErrorText = authResponse.Text;
+            StatusText = $"Auth status failed ({authResponse.Status})";
+            return;
+        }
+
+        if (_authStatus is { TrustedNetwork: false })
+        {
+            Settings.AuthEmail = _authStatus.Email ?? string.Empty;
+            StatusText = "Setup is only available from a trusted network.";
+            return;
+        }
+
+        var setupResponse = await JS.InvokeAsync<ApiEnvelope<LocalSetupSettings>>("h265Auth.fetchJson", "/api/setup");
+        if (setupResponse.Ok && setupResponse.Json is not null)
+        {
+            Settings = new SetupForm
+            {
+                FfmpegPath = setupResponse.Json.FfmpegPath,
+                DefaultHttpStreamUrl = setupResponse.Json.DefaultHttpStreamUrl,
+                DefaultRtspStreamUrl = setupResponse.Json.DefaultRtspStreamUrl,
+                AuthEmail = _authStatus?.Email ?? string.Empty
+            };
+        }
+        else
+        {
+            Settings.AuthEmail = _authStatus?.Email ?? string.Empty;
+            if (!setupResponse.Ok && setupResponse.Status != StatusCodes.Status403Forbidden)
+            {
+                ErrorText = setupResponse.Text;
+                StatusText = $"Setup load failed ({setupResponse.Status})";
+                return;
+            }
+        }
+
+        StatusText = !string.IsNullOrWhiteSpace(Settings.FfmpegPath)
+            ? $"FFmpeg path: {Settings.FfmpegPath}"
+            : "Managed playback is blocked until FFmpeg is configured.";
+
+        await LoadAccountsAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        ErrorText = string.Empty;
+        SuccessText = string.Empty;
+        if (_authStatus is { TrustedNetwork: false })
+        {
+            ErrorText = "Setup is only available from a trusted network.";
+            return;
+        }
+
+        var response = await JS.InvokeAsync<ApiEnvelope<LocalSetupSettings>>("h265Auth.fetchJson", "/api/setup", new
+        {
+            method = "POST",
+            body = System.Text.Json.JsonSerializer.Serialize(new LocalSetupSettings(
+                Settings.FfmpegPath,
+                Settings.DefaultHttpStreamUrl,
+                Settings.DefaultRtspStreamUrl))
+        });
+        if (!response.Ok)
+        {
+            ErrorText = response.Text;
+            StatusText = "Setup failed";
+            return;
+        }
+
+        if (response.Json is not null)
+        {
+            Settings = new SetupForm
+            {
+                FfmpegPath = response.Json.FfmpegPath,
+                DefaultHttpStreamUrl = response.Json.DefaultHttpStreamUrl,
+                DefaultRtspStreamUrl = response.Json.DefaultRtspStreamUrl,
+                AuthEmail = Settings.AuthEmail
+            };
+        }
+
+        StatusText = $"FFmpeg path: {Settings.FfmpegPath}";
+        SuccessText = "Setup saved";
+
+        if (!string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith('/'))
+        {
+            NavigationManager.NavigateTo(ReturnUrl);
+        }
+    }
+
+    private async Task GenerateQrAsync()
+    {
+        ErrorText = string.Empty;
+        SuccessText = string.Empty;
+        _qrCodeDataUrl = string.Empty;
+        _manualKey = string.Empty;
+
+        if (_authStatus is { TrustedNetwork: false })
+        {
+            ErrorText = "Authenticator enrollment is only available from a trusted network.";
+            return;
+        }
+
+        var response = await JS.InvokeAsync<ApiEnvelope<AuthEnrollmentResponse>>("h265Auth.fetchJson", "/api/auth/enroll", new
+        {
+            method = "POST",
+            body = System.Text.Json.JsonSerializer.Serialize(new AuthEnrollmentRequest(Settings.AuthEmail))
+        });
+        if (!response.Ok)
+        {
+            ErrorText = response.Text;
+            return;
+        }
+
+        var enrollment = response.Json;
+        if (enrollment is null)
+        {
+            ErrorText = "Authenticator enrollment failed.";
+            return;
+        }
+
+        Settings.AuthEmail = enrollment.Email;
+        _qrCodeDataUrl = enrollment.QrCodeDataUrl;
+        _manualKey = enrollment.ManualKey;
+        _authStatus = new AuthStatusResponse(true, false, true, true, enrollment.Email, enrollment.Email);
+        await LoadAccountsAsync();
+        SuccessText = "Authenticator secret saved. Scan the QR code with your authenticator app.";
+    }
+
+    private Task RegenerateQrAsync(string email)
+    {
+        Settings.AuthEmail = email;
+        return GenerateQrAsync();
+    }
+
+    private async Task DeleteAccountAsync(string email)
+    {
+        ErrorText = string.Empty;
+        SuccessText = string.Empty;
+
+        if (_authStatus is { TrustedNetwork: false })
+        {
+            ErrorText = "Authenticator management is only available from a trusted network.";
+            return;
+        }
+
+        var response = await JS.InvokeAsync<ApiEnvelope<List<AuthAccountSummary>>>("h265Auth.fetchJson", $"/api/auth/accounts?email={Uri.EscapeDataString(email)}", new
+        {
+            method = "DELETE"
+        });
+        if (!response.Ok)
+        {
+            ErrorText = response.Text;
+            return;
+        }
+
+        _accounts = response.Json ?? [];
+        if (string.Equals(Settings.AuthEmail, email, StringComparison.OrdinalIgnoreCase))
+        {
+            Settings.AuthEmail = string.Empty;
+            _qrCodeDataUrl = string.Empty;
+            _manualKey = string.Empty;
+        }
+
+        if (_accounts.Count == 0)
+        {
+            _authStatus = _authStatus is null
+                ? null
+                : _authStatus with { AuthenticatorConfigured = false, Email = null, EmailHint = null };
+        }
+        else if (_authStatus is not null)
+        {
+            _authStatus = _authStatus with { Email = _accounts[0].Email };
+        }
+
+        SuccessText = $"Deleted {email}.";
+    }
+
+    private async Task CopyQrAsync()
+    {
+        ErrorText = string.Empty;
+        SuccessText = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(_qrCodeDataUrl))
+        {
+            ErrorText = "Generate a QR code first.";
+            return;
+        }
+
+        var copied = await JS.InvokeAsync<bool>("h265Auth.copyQrImage", _qrCodeDataUrl);
+        if (!copied)
+        {
+            ErrorText = "Unable to copy the QR code to the clipboard in this browser.";
+            return;
+        }
+
+        SuccessText = "QR code copied to the clipboard.";
+    }
+
+    private async Task LoadAccountsAsync()
+    {
+        var accountsResponse = await JS.InvokeAsync<ApiEnvelope<List<AuthAccountSummary>>>("h265Auth.fetchJson", "/api/auth/accounts");
+        if (accountsResponse.Ok)
+        {
+            _accounts = accountsResponse.Json ?? [];
+            if (string.IsNullOrWhiteSpace(Settings.AuthEmail) && _accounts.Count > 0)
+            {
+                Settings.AuthEmail = _accounts[0].Email;
+            }
+        }
+        else if (accountsResponse.Status != StatusCodes.Status403Forbidden)
+        {
+            ErrorText = accountsResponse.Text;
+        }
+    }
+
+    private sealed class SetupForm
+    {
+        public string FfmpegPath { get; set; } = string.Empty;
+        public string DefaultHttpStreamUrl { get; set; } = string.Empty;
+        public string DefaultRtspStreamUrl { get; set; } = string.Empty;
+        public string AuthEmail { get; set; } = string.Empty;
+    }
+
+    private sealed class ApiEnvelope<T>
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public T? Json { get; set; }
+    }
+}

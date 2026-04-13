@@ -1,0 +1,53 @@
+.nav-shell {
+    padding: 1.25rem;
+    border-right: 1px solid #2e3b47;
+    background: rgba(11, 16, 21, 0.92);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+}
+
+.brand {
+    display: grid;
+    gap: 0.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.brand-kicker {
+    color: #9fb0bf;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.nav-links {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.nav-links a {
+    color: #edf2f7;
+    text-decoration: none;
+    padding: 0.8rem 0.9rem;
+    border-radius: 12px;
+    background: rgba(31, 43, 53, 0.45);
+}
+
+.nav-links a.active {
+    background: #89d185;
+    color: #10210f;
+    font-weight: 700;
+}
+
+@media (max-width: 920px) {
+    .nav-shell {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid #2e3b47;
+    }
+
+    .nav-links {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    }
+}

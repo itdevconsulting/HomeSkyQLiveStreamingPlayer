@@ -1,0 +1,258 @@
+@implements IDisposable
+@inject IJSRuntime JS
+
+<button type="button" class="mini-remote-toggle @ButtonCssClass" @onclick="ToggleOpen">
+    @if (ButtonContent is not null)
+    {
+        @ButtonContent
+    }
+    else
+    {
+        @ButtonLabel
+    }
+</button>
+
+@if (_isOpen)
+{
+    <div id="@PanelId" class="mini-remote" tabindex="0" @onkeydown="OnKeyDownAsync" @onkeydown:preventDefault>
+        <div id="@HandleId" class="mini-remote-handle">
+            <strong>@Title</strong>
+            <button type="button" class="mini-remote-close" @onclick="Close" title="Close remote">
+                <span class="mini-icon mini-icon-close" aria-hidden="true"></span>
+            </button>
+        </div>
+
+        <div class="mini-remote-section mini-remote-top">
+            @foreach (var command in TopCommands)
+            {
+                <button type="button" class="mini-remote-button mini-remote-button-glass mini-remote-button-pill" @onclick="() => SendAsync(command.Value)" title="@command.Label">
+                    @switch (command.IconKind)
+                    {
+                        case "power":
+                            <span class="mini-icon mini-icon-power" aria-hidden="true"></span>
+                            break;
+                        case "home":
+                            <span class="mini-icon mini-icon-home" aria-hidden="true"></span>
+                            break;
+                        case "guide":
+                            <span class="mini-icon mini-icon-guide" aria-hidden="true"></span>
+                            break;
+                        case "back":
+                            <span class="mini-icon mini-icon-back" aria-hidden="true"></span>
+                            break;
+                        default:
+                            <span>@command.Label</span>
+                            break;
+                    }
+                </button>
+            }
+        </div>
+
+        <div class="mini-remote-section mini-remote-nav">
+            <button type="button" class="mini-remote-button mini-remote-button-glass mini-remote-arrow up" @onclick="SendUpAsync" title="Up">
+                <span class="mini-icon mini-icon-arrow up" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="mini-remote-button mini-remote-button-glass mini-remote-arrow left" @onclick="SendLeftAsync" title="Left">
+                <span class="mini-icon mini-icon-arrow left" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="mini-remote-button mini-remote-button-select" @onclick="SendSelectAsync" title="Select">OK</button>
+            <button type="button" class="mini-remote-button mini-remote-button-glass mini-remote-arrow right" @onclick="SendRightAsync" title="Right">
+                <span class="mini-icon mini-icon-arrow right" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="mini-remote-button mini-remote-button-glass mini-remote-arrow down" @onclick="SendDownAsync" title="Down">
+                <span class="mini-icon mini-icon-arrow down" aria-hidden="true"></span>
+            </button>
+        </div>
+
+        <div class="mini-remote-section mini-remote-transport">
+            @foreach (var command in PlaybackCommands)
+            {
+                <button type="button" class="mini-remote-button mini-remote-button-glass" @onclick="() => SendAsync(command.Value)" title="@command.Label">
+                    @switch (command.IconKind)
+                    {
+                        case "rewind":
+                            <span class="mini-icon mini-icon-rewind" aria-hidden="true"></span>
+                            break;
+                        case "play":
+                            <span class="mini-icon mini-icon-play" aria-hidden="true"></span>
+                            break;
+                        case "pause":
+                            <span class="mini-icon mini-icon-pause" aria-hidden="true"></span>
+                            break;
+                        case "fastforward":
+                            <span class="mini-icon mini-icon-fastforward" aria-hidden="true"></span>
+                            break;
+                        case "channelup":
+                            <span class="mini-icon mini-icon-channel up" aria-hidden="true"></span>
+                            break;
+                        case "channeldown":
+                            <span class="mini-icon mini-icon-channel down" aria-hidden="true"></span>
+                            break;
+                    }
+                </button>
+            }
+        </div>
+
+        <div class="mini-remote-section mini-remote-digits">
+            @foreach (var command in NumberPadCommands)
+            {
+                <button type="button" class="mini-remote-button mini-remote-button-glass mini-remote-digit @(command.IconKind == "channel" ? "mini-remote-channel-button" : string.Empty)" @onclick="() => SendAsync(command.Value)" title="@command.Label">
+                    @if (command.IconKind == "channel-up")
+                    {
+                        <span class="mini-icon mini-icon-channel up" aria-hidden="true"></span>
+                    }
+                    else if (command.IconKind == "channel-down")
+                    {
+                        <span class="mini-icon mini-icon-channel down" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        @command.Label
+                    }
+                </button>
+            }
+        </div>
+
+        <div class="mini-remote-section mini-remote-colors">
+            @foreach (var command in ColorCommands)
+            {
+                <button type="button" class="mini-remote-button mini-remote-color-button mini-remote-color-@command.IconKind" @onclick="() => SendAsync(command.Value)" title="@command.Label">
+                    <span class="mini-color-dot" aria-hidden="true"></span>
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private readonly string PanelId = $"mini-remote-{Guid.NewGuid():N}";
+    private readonly string HandleId = $"mini-remote-handle-{Guid.NewGuid():N}";
+    private bool _isOpen;
+
+    [Parameter]
+    public string Title { get; set; } = "Sky Q Remote";
+
+    [Parameter]
+    public string ButtonLabel { get; set; } = "Remote";
+
+    [Parameter]
+    public string ButtonCssClass { get; set; } = string.Empty;
+
+    [Parameter]
+    public RenderFragment? ButtonContent { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnCommand { get; set; }
+
+    private static readonly IReadOnlyList<RemoteCommand> TopCommands =
+    [
+        new("Power", "power", "power"),
+        new("Home", "home", "home"),
+        new("Guide", "tvguide", "guide"),
+        new("Back", "backup", "back")
+    ];
+
+    private static readonly IReadOnlyList<RemoteCommand> DigitCommands =
+    [
+        new("1", "1"),
+        new("2", "2"),
+        new("3", "3"),
+        new("4", "4"),
+        new("5", "5"),
+        new("6", "6"),
+        new("7", "7"),
+        new("8", "8"),
+        new("9", "9"),
+        new("0", "0")
+    ];
+
+    private static readonly IReadOnlyList<RemoteCommand> NumberPadCommands =
+    [
+        new("1", "1"),
+        new("2", "2"),
+        new("3", "3"),
+        new("4", "4"),
+        new("5", "5"),
+        new("6", "6"),
+        new("7", "7"),
+        new("8", "8"),
+        new("9", "9"),
+        new("Chan +", "channelup", "channel-up"),
+        new("0", "0"),
+        new("Chan -", "channeldown", "channel-down")
+    ];
+
+    private static readonly IReadOnlyList<RemoteCommand> PlaybackCommands =
+    [
+        new("Rewind", "rewind", "rewind"),
+        new("Play", "play", "play"),
+        new("Pause", "pause", "pause"),
+        new("Fast Forward", "fastforward", "fastforward")
+    ];
+
+    private static readonly IReadOnlyList<RemoteCommand> ColorCommands =
+    [
+        new("Red", "red", "red"),
+        new("Green", "green", "green"),
+        new("Yellow", "yellow", "yellow"),
+        new("Blue", "blue", "blue")
+    ];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_isOpen)
+        {
+            await JS.InvokeVoidAsync("h265App.enableMiniRemote", PanelId, HandleId);
+        }
+    }
+
+    private async Task ToggleOpen()
+    {
+        _isOpen = !_isOpen;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void Close()
+    {
+        _isOpen = false;
+    }
+
+    private Task SendAsync(string command) => OnCommand.InvokeAsync(command);
+
+    private Task SendUpAsync() => SendAsync("up");
+
+    private Task SendDownAsync() => SendAsync("down");
+
+    private Task SendLeftAsync() => SendAsync("left");
+
+    private Task SendRightAsync() => SendAsync("right");
+
+    private Task SendSelectAsync() => SendAsync("select");
+
+    private Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        var command = args.Key switch
+        {
+            "ArrowUp" => "up",
+            "ArrowDown" => "down",
+            "ArrowLeft" => "left",
+            "ArrowRight" => "right",
+            "Enter" => "select",
+            "Escape" => "backup",
+            " " => "pause",
+            "Spacebar" => "pause",
+            "0" or "1" or "2" or "3" or "4" or "5" or "6" or "7" or "8" or "9" => args.Key,
+            _ => string.Empty
+        };
+
+        return string.IsNullOrWhiteSpace(command)
+            ? Task.CompletedTask
+            : SendAsync(command);
+    }
+
+    public void Dispose()
+    {
+    }
+
+    private sealed record RemoteCommand(string Label, string Value, string IconKind = "");
+}

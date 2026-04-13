@@ -1,0 +1,401 @@
+@page "/presets"
+@inject DirectSkyQPresetStore PresetStore
+@inject SkyQService SkyQService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Presets</PageTitle>
+
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Presets</p>
+            <h1>Stream + Sky Q Presets</h1>
+            <p class="lede">Create named presets that combine a saved stream source with a Sky Q box. Use Save As Preset from Direct, FFmpeg, RTSP, or HLS to prefill this screen.</p>
+        </div>
+        <PageInfo Title="Presets" Summary="Use this page to save named shortcuts that combine a stream source with a specific Sky Q box." Items="HelpItems" />
+    </div>
+
+    <div class="control-grid">
+        <label class="field">
+            <span>Preset name</span>
+            <input type="text" @bind="Editor.Name" />
+        </label>
+
+        <label class="field">
+            <span>Source type</span>
+            <select @bind="Editor.SourceType">
+                <option value="direct">Direct</option>
+                <option value="ffmpeg">FFmpeg</option>
+                <option value="rtsp">RTSP</option>
+                <option value="hls">HLS</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Stream URL</span>
+            <input type="url" @bind="Editor.StreamUrl" spellcheck="false" />
+        </label>
+
+        <label class="field">
+            <span>Sky Q box</span>
+            <select value="@Editor.SkyQHost" @onchange="OnDeviceChanged">
+                <option value="">Select Sky Q box</option>
+                @foreach (var device in Devices)
+                {
+                    <option value="@device.Host">
+                        @(string.IsNullOrWhiteSpace(device.HostName) ? device.Host : $"{device.HostName} ({device.Host})")
+                    </option>
+                }
+            </select>
+        </label>
+
+        @if (Editor.SourceType is "ffmpeg" or "rtsp")
+        {
+            <label class="field">
+                <span>Video codec</span>
+                <select @bind="Editor.VideoCodec">
+                    <option value="libx264">libx264</option>
+                    <option value="libx265">libx265</option>
+                </select>
+            </label>
+
+            <label class="field">
+                <span>Preset</span>
+                <select @bind="Editor.Preset">
+                    <option value="browser-safe-h264">Browser-safe H.264</option>
+                    <option value="browser-safe-h265">Browser-safe H.265</option>
+                    <option value="low-latency-h264">Low-latency H.264</option>
+                    <option value="copy-video">Copy video</option>
+                </select>
+            </label>
+
+            <label class="field">
+                <span>Audio mode</span>
+                <select @bind="Editor.AudioMode">
+                    <option value="none">No audio</option>
+                    <option value="aac">AAC transcode</option>
+                    <option value="copy">Copy audio</option>
+                </select>
+            </label>
+        }
+    </div>
+
+    @if (Editor.SourceType is "ffmpeg" or "rtsp")
+    {
+        <div class="toggle-grid">
+            <label class="check">
+                <input type="checkbox" @bind="Editor.AutoRestart" />
+                <span>Auto-restart FFmpeg</span>
+            </label>
+            <label class="check">
+                <input type="checkbox" @bind="Editor.AutoPlay" />
+                <span>Auto-play player</span>
+            </label>
+        </div>
+    }
+    else if (Editor.SourceType == "hls")
+    {
+        <div class="toggle-grid">
+            <label class="check">
+                <input type="checkbox" @bind="Editor.UseHlsProxy" />
+                <span>Use HLS proxy rewrite</span>
+            </label>
+        </div>
+    }
+
+    <div class="toolbar">
+        <button type="button" @onclick="SaveAsync">Save preset</button>
+        <button type="button" @onclick="ResetEditor">New preset</button>
+        <button type="button" @onclick="ScanBoxesAsync">Refresh Sky Q boxes</button>
+    </div>
+
+    <div class="status-grid">
+        <div>
+            <span class="label">Result</span>
+            <code>@Status</code>
+        </div>
+        <div>
+            <span class="label">Selected Box</span>
+            <code>@SelectedBoxText</code>
+        </div>
+        <div>
+            <span class="label">Saved Presets</span>
+            <code>@SavedPresets.Count</code>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-copy">
+        <p class="eyebrow">Saved Presets</p>
+    </div>
+
+    <div class="home-grid">
+        @if (SavedPresets.Count == 0)
+        {
+            <div class="home-card">
+                <strong>No presets yet</strong>
+                <span>Use Save As Preset from a stream page or create one manually here.</span>
+            </div>
+        }
+        else
+        {
+            @foreach (var preset in SavedPresets)
+            {
+                <div class="home-card">
+                    <strong>@preset.Name</strong>
+                    <span>@preset.SourceType.ToUpperInvariant()</span>
+                    <span>@preset.StreamUrl</span>
+                    <span>@(string.IsNullOrWhiteSpace(preset.SkyQHostName) ? preset.SkyQHost : $"{preset.SkyQHostName} ({preset.SkyQHost})")</span>
+                    <div class="toolbar">
+                        <button type="button" @onclick="() => EditPreset(preset)">Edit</button>
+                        <button type="button" @onclick="() => OpenPreset(preset.Id)">Open</button>
+                        <button type="button" @onclick="() => DeleteAsync(preset.Id)">Delete</button>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "Use Save As Preset from Direct, FFmpeg, RTSP, or HLS to open this page with the current source already filled in.",
+        "Choose the Sky Q box that should be associated with that saved stream.",
+        "FFmpeg and RTSP presets also store the codec, preset, audio, and autoplay/restart options needed to recreate the stream path.",
+        "HLS presets store whether the HLS proxy rewrite should be used.",
+        "Saved presets are written to disk and also appear in the left navigation under the Presets section."
+    ];
+
+    [SupplyParameterFromQuery(Name = "sourceType")]
+    private string? SourceTypeQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "streamUrl")]
+    private string? StreamUrlQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "videoCodec")]
+    private string? VideoCodecQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "preset")]
+    private string? PresetQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "audioMode")]
+    private string? AudioModeQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "autoRestart")]
+    private bool? AutoRestartQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "autoPlay")]
+    private bool? AutoPlayQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "useHlsProxy")]
+    private bool? UseHlsProxyQuery { get; set; }
+
+    private List<DirectSkyQPreset> SavedPresets { get; set; } = [];
+    private List<SkyQDevice> Devices { get; set; } = [];
+    private EditorModel Editor { get; set; } = new();
+    private string Status { get; set; } = "Idle";
+    private string? _lastPrefillKey;
+
+    private string SelectedBoxText =>
+        string.IsNullOrWhiteSpace(Editor.SkyQHost)
+            ? "None"
+            : string.IsNullOrWhiteSpace(Editor.SkyQHostName)
+                ? Editor.SkyQHost
+                : $"{Editor.SkyQHostName} ({Editor.SkyQHost})";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDevicesAsync(false);
+        LoadPresets();
+    }
+
+    protected override void OnParametersSet()
+    {
+        var prefillKey = string.Join("|",
+            SourceTypeQuery ?? string.Empty,
+            StreamUrlQuery ?? string.Empty,
+            VideoCodecQuery ?? string.Empty,
+            PresetQuery ?? string.Empty,
+            AudioModeQuery ?? string.Empty,
+            AutoRestartQuery?.ToString() ?? string.Empty,
+            AutoPlayQuery?.ToString() ?? string.Empty,
+            UseHlsProxyQuery?.ToString() ?? string.Empty);
+
+        if (prefillKey == _lastPrefillKey || string.IsNullOrWhiteSpace(StreamUrlQuery))
+        {
+            return;
+        }
+
+        _lastPrefillKey = prefillKey;
+        Editor = new EditorModel
+        {
+            Name = BuildDefaultName(StreamUrlQuery!, SourceTypeQuery),
+            SourceType = NormalizeSourceType(SourceTypeQuery),
+            StreamUrl = StreamUrlQuery ?? string.Empty,
+            VideoCodec = string.IsNullOrWhiteSpace(VideoCodecQuery) ? "libx264" : VideoCodecQuery,
+            Preset = string.IsNullOrWhiteSpace(PresetQuery) ? "browser-safe-h264" : PresetQuery,
+            AudioMode = string.IsNullOrWhiteSpace(AudioModeQuery) ? "none" : AudioModeQuery,
+            AutoRestart = AutoRestartQuery ?? true,
+            AutoPlay = AutoPlayQuery ?? true,
+            UseHlsProxy = UseHlsProxyQuery ?? true
+        };
+        Status = "Preset editor prefilled from source page";
+    }
+
+    private void LoadPresets()
+    {
+        SavedPresets = PresetStore.GetAll().ToList();
+    }
+
+    private async Task LoadDevicesAsync(bool force)
+    {
+        var scan = await SkyQService.GetScanAsync(force, CancellationToken.None);
+        Devices = scan.Devices.ToList();
+    }
+
+    private async Task ScanBoxesAsync()
+    {
+        await LoadDevicesAsync(true);
+        Status = $"Loaded {Devices.Count} Sky Q boxes";
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Editor.Name))
+        {
+            Status = "Preset name is required";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Editor.StreamUrl))
+        {
+            Status = "Stream URL is required";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Editor.SkyQHost))
+        {
+            Status = "Sky Q box is required";
+            return;
+        }
+
+        var saved = await PresetStore.SaveAsync(new DirectSkyQPreset(
+            Editor.Id,
+            Editor.Name,
+            NormalizeSourceType(Editor.SourceType),
+            Editor.StreamUrl,
+            Editor.VideoCodec,
+            Editor.Preset,
+            Editor.AudioMode,
+            Editor.AutoRestart,
+            Editor.AutoPlay,
+            Editor.UseHlsProxy,
+            Editor.SkyQHost,
+            Editor.SkyQHostName,
+            Editor.SkyQModel,
+            DateTimeOffset.UtcNow));
+
+        LoadPresets();
+        EditPreset(saved);
+        Status = $"Saved {saved.Name}";
+    }
+
+    private void ResetEditor()
+    {
+        Editor = new EditorModel();
+        Status = "New preset";
+    }
+
+    private void EditPreset(DirectSkyQPreset preset)
+    {
+        Editor = new EditorModel
+        {
+            Id = preset.Id,
+            Name = preset.Name,
+            SourceType = preset.SourceType,
+            StreamUrl = preset.StreamUrl,
+            VideoCodec = preset.VideoCodec,
+            Preset = preset.Preset,
+            AudioMode = preset.AudioMode,
+            AutoRestart = preset.AutoRestart,
+            AutoPlay = preset.AutoPlay,
+            UseHlsProxy = preset.UseHlsProxy,
+            SkyQHost = preset.SkyQHost,
+            SkyQHostName = preset.SkyQHostName,
+            SkyQModel = preset.SkyQModel
+        };
+        Status = $"Editing {preset.Name}";
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        await PresetStore.DeleteAsync(id);
+        LoadPresets();
+        if (Editor.Id == id)
+        {
+            ResetEditor();
+        }
+
+        Status = "Preset deleted";
+    }
+
+    private void OpenPreset(Guid id)
+    {
+        NavigationManager.NavigateTo($"/preset/{id}");
+    }
+
+    private Task OnDeviceChanged(ChangeEventArgs args)
+    {
+        var host = args.Value?.ToString() ?? string.Empty;
+        var device = Devices.FirstOrDefault(item => item.Host == host);
+        Editor.SkyQHost = device?.Host ?? string.Empty;
+        Editor.SkyQHostName = device?.HostName ?? string.Empty;
+        Editor.SkyQModel = device?.Model ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private static string NormalizeSourceType(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "ffmpeg" => "ffmpeg",
+            "rtsp" => "rtsp",
+            "hls" => "hls",
+            _ => "direct"
+        };
+    }
+
+    private static string BuildDefaultName(string streamUrl, string? sourceType)
+    {
+        if (Uri.TryCreate(streamUrl, UriKind.Absolute, out var uri))
+        {
+            var tail = uri.Segments.LastOrDefault()?.Trim('/').Trim();
+            if (!string.IsNullOrWhiteSpace(tail))
+            {
+                return $"{NormalizeSourceType(sourceType).ToUpperInvariant()} {tail}";
+            }
+        }
+
+        return $"{NormalizeSourceType(sourceType).ToUpperInvariant()} preset";
+    }
+
+    private sealed class EditorModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string SourceType { get; set; } = "direct";
+        public string StreamUrl { get; set; } = "http://192.168.15.169/hd.ts";
+        public string VideoCodec { get; set; } = "libx264";
+        public string Preset { get; set; } = "browser-safe-h264";
+        public string AudioMode { get; set; } = "none";
+        public bool AutoRestart { get; set; } = true;
+        public bool AutoPlay { get; set; } = true;
+        public bool UseHlsProxy { get; set; } = true;
+        public string SkyQHost { get; set; } = string.Empty;
+        public string SkyQHostName { get; set; } = string.Empty;
+        public string SkyQModel { get; set; } = string.Empty;
+    }
+}

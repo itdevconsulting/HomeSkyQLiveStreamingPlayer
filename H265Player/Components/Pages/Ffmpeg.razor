@@ -1,0 +1,313 @@
+@page "/ffmpeg"
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+@inject LocalSetupStore LocalSetupStore
+
+<PageTitle>FFmpeg</PageTitle>
+
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Managed FFmpeg</p>
+            <h1>Transcoded Stream</h1>
+            <p class="lede">This path starts FFmpeg inside the app, writes live HLS output to this server, and then plays that output back with `h265web.js`.</p>
+        </div>
+        <PageInfo Title="Managed FFmpeg" Summary="Use this page when the source stream needs to be normalized or transcoded server-side before browser playback." Items="HelpItems" />
+    </div>
+
+    <div class="control-grid">
+        <label class="field">
+            <span>Source URL</span>
+            <input id="stream-url" type="url" @bind="Settings.InputUrl" spellcheck="false" />
+        </label>
+        <label class="field">
+            <span>Recent Streams</span>
+            <select @onchange="OnRecentChanged">
+                <option value="">Select recent stream</option>
+                @foreach (var recent in RecentStreams)
+                {
+                    <option value="@recent">@recent</option>
+                }
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Video codec</span>
+            <select id="video-codec" @bind="Settings.VideoCodec">
+                <option value="libx264">libx264</option>
+                <option value="libx265">libx265</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Preset</span>
+            <select id="preset" @bind="Settings.Preset">
+                <option value="browser-safe-h264">Browser-safe H.264</option>
+                <option value="browser-safe-h265">Browser-safe H.265</option>
+                <option value="low-latency-h264">Low-latency H.264</option>
+                <option value="copy-video">Copy video</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Audio mode</span>
+            <select id="audio-mode" @bind="Settings.AudioMode">
+                <option value="none">No audio</option>
+                <option value="aac">AAC transcode</option>
+                <option value="copy">Copy audio</option>
+            </select>
+        </label>
+    </div>
+
+    <div class="toggle-grid">
+        <label class="check">
+            <input id="auto-restart" type="checkbox" @bind="Settings.AutoRestart" />
+            <span>Auto-restart FFmpeg</span>
+        </label>
+        <label class="check">
+            <input id="auto-play" type="checkbox" @bind="Settings.AutoPlay" />
+            <span>Auto-play player</span>
+        </label>
+        <label class="check">
+            <input id="auto-start" type="checkbox" @bind="Settings.AutoStart" />
+            <span>Start transcoder on launch</span>
+        </label>
+    </div>
+
+    <div class="toolbar">
+        <button id="save-settings-button" type="button" @onclick="SaveSettingsAsync">Save settings</button>
+        <button id="start-transcode-button" type="button" @onclick="GoAsync">Go</button>
+        <button type="button" @onclick="SaveAsPreset">Save As Preset</button>
+    </div>
+
+    <div class="status-grid">
+        <div>
+            <span class="label">App Base URL</span>
+            <code>@NavigationManager.BaseUri</code>
+        </div>
+        <div>
+            <span class="label">Manifest URL</span>
+            <code id="manifest-url">@ManifestUrl</code>
+        </div>
+        <div>
+            <span class="label">Transcoder state</span>
+            <code id="transcoder-status">@TranscoderStatus</code>
+        </div>
+        <div>
+            <span class="label">Player state</span>
+            <code id="player-status">@PlayerStatus</code>
+        </div>
+    </div>
+</section>
+
+<section class="player-panel">
+    <div id="ffmpeg-player-host" class="player-host"></div>
+    <pre id="ffmpeg-log" class="log">@LogText</pre>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "Source URL is the encoder or upstream stream that FFmpeg will ingest.",
+        "Video codec chooses the encoder FFmpeg uses for output: libx264 is the safer browser option, while libx265 keeps HEVC when the target browser path can handle it.",
+        "Preset is the FFmpeg output recipe: browser-safe H.264 is the default compatibility path, browser-safe H.265 keeps HEVC with conservative settings, low-latency H.264 favors speed and shorter buffering, and copy video avoids re-encoding when the source already fits.",
+        "Audio mode controls the output audio track: none disables audio, AAC transcodes to a browser-friendly format, and copy passes the source audio through unchanged.",
+        "Save settings persists the current FFmpeg input and codec options to the server settings file.",
+        "Go saves the current settings, tears down any existing FFmpeg run, starts a new one, and then loads the generated HLS output.",
+        "Use this page when direct browser playback is unreliable but the stream can be cleaned up by FFmpeg first."
+    ];
+
+    private FfmpegSettings Settings { get; set; } = new();
+    private string ManifestUrl { get; set; } = "/live/stream.m3u8";
+    private string TranscoderStatus { get; set; } = "Idle";
+    private string PlayerStatus { get; set; } = "Idle";
+    private string LogText { get; set; } = string.Empty;
+    private List<string> RecentStreams { get; set; } = [];
+
+    protected override void OnInitialized()
+    {
+        if (!LocalSetupStore.IsConfigured())
+        {
+            NavigationManager.NavigateTo($"/setup?returnUrl={Uri.EscapeDataString("/ffmpeg")}");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !LocalSetupStore.IsConfigured())
+        {
+            return;
+        }
+
+        await LoadSettingsAsync();
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.getRecentStreams", "ffmpeg");
+        await RefreshStatusAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        var response = await JS.InvokeAsync<ApiResult>("h265Auth.fetchJson", "/api/settings");
+        if (response.Ok && response.Json is not null)
+        {
+            Settings = response.Json;
+        }
+
+        ManifestUrl = $"{NavigationManager.BaseUri.TrimEnd('/')}/live/stream.m3u8";
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        if (!EnsureFfmpegConfigured())
+        {
+            return;
+        }
+
+        var response = await JS.InvokeAsync<ApiResult>("h265Auth.fetchJson", "/api/settings", new
+        {
+            method = "POST",
+            body = System.Text.Json.JsonSerializer.Serialize(Settings)
+        });
+        if (!response.Ok)
+        {
+            TranscoderStatus = $"Save failed ({response.Status})";
+            LogText = response.Text;
+            return;
+        }
+
+        if (response.Json is not null)
+        {
+            Settings = response.Json;
+        }
+
+        TranscoderStatus = "Settings saved";
+    }
+
+    private async Task GoAsync()
+    {
+        if (!EnsureFfmpegConfigured())
+        {
+            return;
+        }
+
+        await SaveSettingsAsync();
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.pushRecentStream", "ffmpeg", Settings.InputUrl);
+        var response = await JS.InvokeAsync<ApiEnvelope<TranscoderStatusResponse>>("h265Auth.fetchJson", "/api/transcoder/start", new
+        {
+            method = "POST",
+            body = System.Text.Json.JsonSerializer.Serialize(new StartRequest { Settings = Settings })
+        });
+        if (!response.Ok)
+        {
+            TranscoderStatus = $"Start failed ({response.Status})";
+            PlayerStatus = "Idle";
+            LogText = response.Text;
+            return;
+        }
+
+        ApplyStatus(response.Json);
+        await JS.InvokeVoidAsync("h265App.ffmpegLoad", "/live/stream.m3u8", Settings.AutoPlay, Settings.AudioMode == "none");
+        PlayerStatus = "Loading";
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        var response = await JS.InvokeAsync<ApiEnvelope<TranscoderStatusResponse>>("h265Auth.fetchJson", "/api/transcoder/status");
+        if (response.Ok)
+        {
+            ApplyStatus(response.Json);
+        }
+    }
+
+    private void ApplyStatus(TranscoderStatusResponse? status)
+    {
+        if (status is null)
+        {
+            return;
+        }
+
+        ManifestUrl = $"{NavigationManager.BaseUri.TrimEnd('/')}{status.ManifestUrl}";
+        TranscoderStatus = status.IsRunning
+            ? $"Running ({status.Settings?.Preset ?? status.Settings?.VideoCodec ?? "active"})"
+            : "Stopped";
+        LogText = status.Logs is { Count: > 0 } ? string.Join(Environment.NewLine, status.Logs) : string.Empty;
+    }
+
+    private bool EnsureFfmpegConfigured()
+    {
+        if (!string.IsNullOrWhiteSpace(Settings.FfmpegPath))
+        {
+            return true;
+        }
+
+        NavigationManager.NavigateTo($"/setup?returnUrl={Uri.EscapeDataString("/ffmpeg")}");
+        TranscoderStatus = "FFmpeg path missing";
+        PlayerStatus = "Idle";
+        LogText = "FFmpeg is not configured. Open Setup and save a valid ffmpeg.exe path.";
+        return false;
+    }
+
+    private Task OnRecentChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            Settings.InputUrl = value;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void SaveAsPreset()
+    {
+        var target =
+            $"/presets?sourceType=ffmpeg&streamUrl={Uri.EscapeDataString(Settings.InputUrl)}" +
+            $"&videoCodec={Uri.EscapeDataString(Settings.VideoCodec)}" +
+            $"&preset={Uri.EscapeDataString(Settings.Preset)}" +
+            $"&audioMode={Uri.EscapeDataString(Settings.AudioMode)}" +
+            $"&autoRestart={Settings.AutoRestart}" +
+            $"&autoPlay={Settings.AutoPlay}";
+        NavigationManager.NavigateTo(target);
+    }
+
+    private sealed class StartRequest
+    {
+        public FfmpegSettings Settings { get; set; } = new();
+    }
+
+    private sealed class ApiResult
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public FfmpegSettings? Json { get; set; }
+    }
+
+    private sealed class ApiEnvelope<T>
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public T? Json { get; set; }
+    }
+
+    private sealed class TranscoderStatusResponse
+    {
+        public bool IsRunning { get; set; }
+        public string ManifestUrl { get; set; } = "/live/stream.m3u8";
+        public FfmpegSettings? Settings { get; set; }
+        public List<string> Logs { get; set; } = [];
+    }
+
+    private sealed class FfmpegSettings
+    {
+        public string FfmpegPath { get; set; } = string.Empty;
+        public string InputUrl { get; set; } = string.Empty;
+        public string VideoCodec { get; set; } = "libx264";
+        public string Preset { get; set; } = "browser-safe-h264";
+        public string AudioMode { get; set; } = "none";
+        public bool AutoRestart { get; set; } = true;
+        public bool AutoPlay { get; set; } = true;
+        public bool AutoStart { get; set; }
+    }
+}

@@ -1,0 +1,115 @@
+@page "/"
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IJSRuntime JS
+@inject LocalSetupStore LocalSetupStore
+@inject TrustedNetworkService TrustedNetworkService
+
+<PageTitle>Home</PageTitle>
+
+<section class="panel home-panel">
+    <div class="panel-head">
+        <div>
+            <p class="eyebrow">Home</p>
+            <h1>Stream Lab</h1>
+            <p class="lede">This is the default landing page for the Blazor Server app. Use the navigation to open the direct decoder, managed FFmpeg, or HLS playback pages.</p>
+        </div>
+        <PageInfo Title="Home" Summary="Use this page to choose the right playback or control path before you start testing." Items="HomeHelpItems" />
+    </div>
+    <div class="status-grid">
+        <div>
+            <span class="label">App Base URL</span>
+            <code>@NavigationManager.BaseUri</code>
+        </div>
+        <div>
+            <span class="label">FFmpeg Setup</span>
+            <code>@(LocalSetupStore.IsConfigured() ? "Configured" : "Required")</code>
+        </div>
+        <div>
+            <span class="label">Access</span>
+            <code>@AccessStatus</code>
+            @if (ShowLogout)
+            {
+                <button type="button" class="home-logout-button" @onclick="LogoutAsync">Logout</button>
+            }
+        </div>
+    </div>
+
+    <div class="home-grid">
+        <a class="home-card" href="/setup">
+            <strong>Setup</strong>
+            <span>Configure the local FFmpeg executable and optional machine defaults before using managed playback pages.</span>
+        </a>
+        <a class="home-card" href="/direct">
+            <strong>Direct</strong>
+            <span>Original proxy + browser decoder flow for raw TS input.</span>
+        </a>
+        <a class="home-card" href="/ffmpeg">
+            <strong>FFmpeg</strong>
+            <span>Managed transcoding inside the app with saved settings and restart logic.</span>
+        </a>
+        <a class="home-card" href="/rtsp">
+            <strong>RTSP</strong>
+            <span>Managed RTSP ingest via FFmpeg with browser playback from the generated HLS output.</span>
+        </a>
+        <a class="home-card" href="/hls">
+            <strong>HLS</strong>
+            <span>Playlist playback with `hls.js` and optional same-origin proxy rewriting.</span>
+        </a>
+        <a class="home-card" href="/engines">
+            <strong>Engines</strong>
+            <span>Compare alternate JS player libraries for TS and HLS without changing the main pages.</span>
+        </a>
+        <a class="home-card" href="/skyq">
+            <strong>Sky Q</strong>
+            <span>Scan connected private subnets for Sky Q boxes and control them from a browser-based remote.</span>
+        </a>
+        <a class="home-card" href="/presets">
+            <strong>Presets</strong>
+            <span>Save named Direct + Sky Q combinations and launch them from the left navigation.</span>
+        </a>
+    </div>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HomeHelpItems =
+    [
+        "Direct is the simplest raw stream test page for HTTP MPEG-TS input.",
+        "Setup configures the local FFmpeg path once for this machine. The managed FFmpeg, RTSP, and managed preset paths depend on it.",
+        "FFmpeg and RTSP are the managed server-side paths. They use the saved FFmpeg settings and generate browser-friendly HLS output.",
+        "HLS is the straightforward browser page for .m3u8 playback with optional proxy rewriting.",
+        "Engines is the comparison page for trying different browser player libraries against the same stream.",
+        "Sky Q is separate from video playback. It scans the local private network for Sky Q boxes and exposes remote control buttons."
+    ];
+
+    private string AccessStatus { get; set; } = "Unknown";
+    private bool ShowLogout { get; set; }
+
+    protected override void OnInitialized()
+    {
+        var context = HttpContextAccessor.HttpContext;
+        if (context is null)
+        {
+            return;
+        }
+
+        if (TrustedNetworkService.IsTrustedRequest(context))
+        {
+            AccessStatus = "Trusted network";
+            return;
+        }
+
+        AccessStatus = context.User.Identity?.IsAuthenticated == true
+            ? $"Authenticator session ({context.User.Identity?.Name})"
+            : "External login required";
+        ShowLogout = context.User.Identity?.IsAuthenticated == true;
+    }
+
+    private async Task LogoutAsync()
+    {
+        await JS.InvokeVoidAsync("h265Auth.logout");
+        NavigationManager.NavigateTo("/auth/login", forceLoad: true);
+    }
+
+    [Inject]
+    private NavigationManager NavigationManager { get; set; } = default!;
+}

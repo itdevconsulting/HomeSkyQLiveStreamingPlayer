@@ -1,0 +1,189 @@
+@page "/engines"
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+
+<PageTitle>Engines</PageTitle>
+
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Engine Comparison</p>
+            <h1>Alternate Player Libraries</h1>
+            <p class="lede">Use this page to compare browser-side player engines against the same stream without changing the existing Direct or HLS pages.</p>
+        </div>
+        <PageInfo Title="Alternate Player Libraries" Summary="Use this page to compare different browser player engines against the same source URL." Items="HelpItems" />
+    </div>
+
+    <div class="control-grid">
+        <label class="field">
+            <span>Transport</span>
+            <select @bind="Transport" @bind:after="OnTransportChangedAsync">
+                <option value="ts">MPEG-TS</option>
+                <option value="hls">HLS</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Engine</span>
+            <select @bind="Engine">
+                @foreach (var option in EngineOptions)
+                {
+                    <option value="@option.Value">@option.Label</option>
+                }
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Stream URL</span>
+            <input type="url" @bind="StreamUrl" spellcheck="false" />
+        </label>
+
+        <label class="field">
+            <span>Recent Streams</span>
+            <select @onchange="OnRecentChanged">
+                <option value="">Select recent stream</option>
+                @foreach (var recent in RecentStreams)
+                {
+                    <option value="@recent">@recent</option>
+                }
+            </select>
+        </label>
+    </div>
+
+    @if (Transport == "hls")
+    {
+        <div class="toggle-grid">
+            <label class="check">
+                <input type="checkbox" @bind="UseHlsProxy" />
+                <span>Use HLS proxy rewrite</span>
+            </label>
+        </div>
+    }
+
+    <div class="toolbar">
+        <button id="engines-go-button" type="button" @onclick="GoAsync">Go</button>
+    </div>
+
+    <div class="status-grid">
+        <div>
+            <span class="label">App Base URL</span>
+            <code>@NavigationManager.BaseUri</code>
+        </div>
+        <div>
+            <span class="label">Resolved URL</span>
+            <code>@ResolvedUrl</code>
+        </div>
+        <div>
+            <span class="label">Engine</span>
+            <code>@EngineStatus</code>
+        </div>
+        <div>
+            <span class="label">State</span>
+            <code>@Status</code>
+        </div>
+    </div>
+</section>
+
+<section class="player-panel">
+    <div id="alt-managed-host" class="player-host" style="display:none"></div>
+    <video id="alt-ts-video" class="video-host" style="display:none" controls playsinline></video>
+    <video id="alt-hls-video" class="video-host video-js vjs-default-skin" style="display:none" controls playsinline></video>
+    <pre class="log">@LogText</pre>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "Choose the transport first because the available player engines depend on whether the source is raw MPEG-TS or HLS.",
+        "MPEG-TS mode is for direct TS endpoints. HLS mode is for .m3u8 playback and can optionally use the same-origin HLS proxy.",
+        "Go tears down the previous comparison player and starts the selected engine against the current URL.",
+        "Use this page when one encoder works with one library but not another and you want a direct side-by-side test path.",
+        "The log panel is meant to capture library-specific failure details so you can tell whether the issue is transport, player engine, or browser support."
+    ];
+
+    private string Transport { get; set; } = "ts";
+    private string Engine { get; set; } = "mpegts";
+    private string StreamUrl { get; set; } = "http://192.168.15.169/hd.ts";
+    private bool UseHlsProxy { get; set; } = true;
+    private string ResolvedUrl { get; set; } = string.Empty;
+    private string EngineStatus { get; set; } = "mpegts.js";
+    private string Status { get; set; } = "Idle";
+    private string LogText { get; set; } = string.Empty;
+    private List<string> RecentStreams { get; set; } = [];
+
+    private IReadOnlyList<EngineOption> EngineOptions =>
+        Transport == "hls"
+            ? [new("hlsjs", "hls.js"), new("videojs", "video.js")]
+            : [new("mpegts", "mpegts.js"), new("h265web", "h265web.js")];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await LoadRecentStreamsAsync();
+        await JS.InvokeVoidAsync("h265App.altRelease");
+        StateHasChanged();
+    }
+
+    private async Task OnTransportChangedAsync()
+    {
+        Engine = Transport == "hls" ? "hlsjs" : "mpegts";
+        StreamUrl = Transport == "hls" ? "http://192.168.15.169/0.m3u8" : "http://192.168.15.169/hd.ts";
+        Status = "Idle";
+        LogText = string.Empty;
+        ResolvedUrl = string.Empty;
+        await JS.InvokeVoidAsync("h265App.altRelease");
+        await LoadRecentStreamsAsync();
+    }
+
+    private async Task LoadRecentStreamsAsync()
+    {
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.getRecentStreams", RecentKey);
+    }
+
+    private string RecentKey => $"engines-{Transport}";
+
+    private async Task GoAsync()
+    {
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.pushRecentStream", RecentKey, StreamUrl);
+        EngineResult? result = Transport == "hls"
+            ? await JS.InvokeAsync<EngineResult>("h265App.altHlsLoad", StreamUrl, Engine, UseHlsProxy)
+            : await JS.InvokeAsync<EngineResult>("h265App.altTsLoad", StreamUrl, Engine);
+
+        if (result is null)
+        {
+            Status = "Failed";
+            LogText = "No result returned from player engine.";
+            return;
+        }
+
+        ResolvedUrl = result.ResolvedUrl;
+        EngineStatus = result.Engine;
+        Status = result.Status;
+        LogText = result.Log;
+    }
+
+    private Task OnRecentChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            StreamUrl = value;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private sealed record EngineOption(string Value, string Label);
+
+    private sealed class EngineResult
+    {
+        public string ResolvedUrl { get; set; } = string.Empty;
+        public string Engine { get; set; } = string.Empty;
+        public string Status { get; set; } = "Idle";
+        public string Log { get; set; } = string.Empty;
+    }
+}

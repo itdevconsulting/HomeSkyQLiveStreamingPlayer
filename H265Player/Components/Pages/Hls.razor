@@ -1,0 +1,132 @@
+@page "/hls"
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+
+<PageTitle>HLS</PageTitle>
+
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">HLS Playback</p>
+            <h1>HLS Stream</h1>
+            <p class="lede">This page uses `hls.js` when needed and falls back to native HLS where the browser supports it. The proxy option rewrites the playlist and segment URLs back through this server.</p>
+        </div>
+        <PageInfo Title="HLS Stream" Summary="Use this page for standard .m3u8 playback in the browser." Items="HelpItems" />
+    </div>
+    <div class="control-grid">
+        <label class="field">
+            <span>HLS URL</span>
+            <input id="hls-url" type="url" @bind="HlsUrl" spellcheck="false" />
+        </label>
+        <label class="field">
+            <span>Recent Streams</span>
+            <select @onchange="OnRecentChanged">
+                <option value="">Select recent stream</option>
+                @foreach (var recent in RecentStreams)
+                {
+                    <option value="@recent">@recent</option>
+                }
+            </select>
+        </label>
+        <div class="field">
+            <span>Resolved URL</span>
+            <code id="hls-resolved-url">@ResolvedUrl</code>
+        </div>
+    </div>
+    <div class="toggle-grid">
+        <label class="check">
+            <input id="hls-use-proxy" type="checkbox" @bind="UseProxy" />
+            <span>Use HLS proxy rewrite</span>
+        </label>
+    </div>
+    <div class="toolbar">
+        <button id="hls-load-button" type="button" @onclick="GoAsync">Go</button>
+        <button type="button" @onclick="SaveAsPreset">Save As Preset</button>
+    </div>
+    <div class="status-grid">
+        <div>
+            <span class="label">App Base URL</span>
+            <code>@NavigationManager.BaseUri</code>
+        </div>
+        <div>
+            <span class="label">Framework</span>
+            <code id="hls-framework">@Framework</code>
+        </div>
+        <div>
+            <span class="label">State</span>
+            <code id="hls-status">@Status</code>
+        </div>
+    </div>
+</section>
+
+<section class="player-panel">
+    <video id="hls-video" class="video-host" controls playsinline></video>
+    <pre id="hls-log" class="log">@LogText</pre>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "Enter the manifest URL for the stream, typically a .m3u8 endpoint.",
+        "Enable Use HLS proxy rewrite if the encoder does not expose CORS headers or if segment/key URLs need to stay same-origin.",
+        "Go rebuilds the player from scratch and starts the selected URL immediately.",
+        "Framework tells you whether playback is using hls.js or a native browser HLS path.",
+        "If H.264 HLS works but H.265 HLS does not, that usually points to browser codec support rather than the page logic."
+    ];
+
+    private string HlsUrl { get; set; } = "http://192.168.15.169/0.m3u8";
+    private bool UseProxy { get; set; } = true;
+    private string ResolvedUrl =>
+        UseProxy
+            ? $"{NavigationManager.BaseUri.TrimEnd('/')}/hls-proxy/playlist?url={Uri.EscapeDataString(HlsUrl)}"
+            : HlsUrl;
+    private string Framework { get; set; } = "Idle";
+    private string Status { get; set; } = "Idle";
+    private string LogText { get; set; } = string.Empty;
+    private List<string> RecentStreams { get; set; } = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.getRecentStreams", "hls");
+        StateHasChanged();
+    }
+
+    private async Task GoAsync()
+    {
+        RecentStreams = await JS.InvokeAsync<List<string>>("h265App.pushRecentStream", "hls", HlsUrl);
+        var result = await JS.InvokeAsync<HlsLoadResult>("h265App.hlsLoad", HlsUrl, UseProxy);
+        Framework = result.Framework;
+        Status = result.Status;
+        LogText = $"Starting {result.ResolvedUrl}";
+    }
+
+    private Task OnRecentChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            HlsUrl = value;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void SaveAsPreset()
+    {
+        var target = $"/presets?sourceType=hls&streamUrl={Uri.EscapeDataString(HlsUrl)}&useHlsProxy={UseProxy}";
+        NavigationManager.NavigateTo(target);
+    }
+
+    private sealed class HlsLoadResult
+    {
+        public string ResolvedUrl { get; set; } = string.Empty;
+        public string Framework { get; set; } = "Idle";
+        public string Status { get; set; } = "Idle";
+    }
+
+}
