@@ -6,6 +6,8 @@ REPO_URL="${REPO_URL:-https://github.com/itdevconsulting/HomeSkyQLiveStreamingPl
 REPO_BRANCH="${REPO_BRANCH:-master}"
 CHECKOUT_DIR="${CHECKOUT_DIR:-/usr/local/src/homeskyqlivestreamingplayer}"
 INSTALL_SCRIPT_RELATIVE="scripts/install-linux.sh"
+BUILD_USER="${SUDO_USER:-$(id -un)}"
+BUILD_GROUP="$(id -gn "$BUILD_USER" 2>/dev/null || echo "$BUILD_USER")"
 
 log() {
     printf '\n[HomeSkyQLiveStreamingPlayer] %s\n' "$1"
@@ -82,6 +84,7 @@ sync_checkout() {
         log "Cloning $REPO_URL"
         rm -rf "$CHECKOUT_DIR"
         git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$CHECKOUT_DIR"
+        chown -R "$BUILD_USER:$BUILD_GROUP" "$CHECKOUT_DIR"
         return
     fi
 
@@ -90,6 +93,7 @@ sync_checkout() {
     git -C "$CHECKOUT_DIR" fetch --depth 1 origin "$REPO_BRANCH"
     git -C "$CHECKOUT_DIR" checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
     git -C "$CHECKOUT_DIR" reset --hard "origin/$REPO_BRANCH"
+    chown -R "$BUILD_USER:$BUILD_GROUP" "$CHECKOUT_DIR"
 }
 
 run_installer() {
