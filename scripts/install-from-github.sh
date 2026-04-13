@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer.git}"
-REPO_BRANCH="${REPO_BRANCH:-master}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 CHECKOUT_DIR="${CHECKOUT_DIR:-/usr/local/src/homeskyqlivestreamingplayer}"
 INSTALL_SCRIPT_RELATIVE="scripts/install-linux.sh"
 BUILD_USER="${SUDO_USER:-$(id -un)}"

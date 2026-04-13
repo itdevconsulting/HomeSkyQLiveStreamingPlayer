@@ -3,13 +3,13 @@
 Quick install from the public GitHub repo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/master/scripts/install-from-github.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
 ```
 
 Alternative one-liners:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/master/scripts/install-from-github.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
 ```
 
 Local repo install from the repository root on the target Linux machine:
