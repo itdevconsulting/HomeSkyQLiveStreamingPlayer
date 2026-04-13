@@ -20,6 +20,7 @@ PROJECT_FILE="${PROJECT_FILE:-$REPO_ROOT/H265Player/H265Player.csproj}"
 PUBLISH_TMP="$(mktemp -d /tmp/skystreamingservice-publish.XXXXXX)"
 BACKUP_TMP="$(mktemp -d /tmp/skystreamingservice-backup.XXXXXX)"
 BUILD_USER="${SUDO_USER:-$(id -un)}"
+BUILD_GROUP="$(id -gn "$BUILD_USER" 2>/dev/null || echo "$BUILD_USER")"
 
 cleanup() {
     rm -rf "$PUBLISH_TMP" "$BACKUP_TMP"
@@ -43,6 +44,10 @@ require_root() {
 
 require_systemd() {
     command -v systemctl >/dev/null 2>&1 || fail "systemd is required."
+}
+
+ensure_build_user_exists() {
+    id -u "$BUILD_USER" >/dev/null 2>&1 || fail "Build user '$BUILD_USER' does not exist."
 }
 
 detect_arch() {
@@ -198,6 +203,18 @@ ensure_service_account() {
     mkdir -p "$STATE_DIR"
     chown -R "$SERVICE_USER:$SERVICE_GROUP" "$STATE_DIR"
     chmod 750 "$STATE_DIR"
+}
+
+ensure_build_workspace_writable() {
+    local repo_root
+    repo_root="$(cd -- "$(dirname -- "$PROJECT_FILE")/.." && pwd)"
+
+    mkdir -p "$PUBLISH_TMP" "$BACKUP_TMP"
+    chown -R "$BUILD_USER:$BUILD_GROUP" "$PUBLISH_TMP"
+
+    if [[ -d "$repo_root" ]]; then
+        chown -R "$BUILD_USER:$BUILD_GROUP" "$repo_root"
+    fi
 }
 
 run_publish() {
@@ -399,12 +416,14 @@ EOF
 main() {
     require_root
     require_systemd
+    ensure_build_user_exists
     [[ -f "$PROJECT_FILE" ]] || fail "Project file not found at $PROJECT_FILE"
 
     ensure_base_prereqs
     ensure_ffmpeg
     ensure_dotnet_sdk
     ensure_service_account
+    ensure_build_workspace_writable
 
     log "Publishing application"
     run_publish
