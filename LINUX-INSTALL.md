@@ -3,13 +3,21 @@
 Quick install from the public GitHub repo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo REPO_BRANCH=main bash
 ```
 
 Alternative one-liners:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo REPO_BRANCH=main bash
+
+If you already have a broken install or an old root-owned checkout, reset it first:
+
+```bash
+sudo systemctl stop SkyStreamingService 2>/dev/null || true
+sudo rm -rf /usr/local/src/homeskyqlivestreamingplayer
+curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo REPO_BRANCH=main bash
+```
 ```
 
 Local repo install from the repository root on the target Linux machine:
