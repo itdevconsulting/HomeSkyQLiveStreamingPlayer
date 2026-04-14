@@ -1,6 +1,5 @@
 @implements IDisposable
 @inject DirectSkyQPresetStore PresetStore
-@inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JS
 
@@ -82,16 +81,34 @@
 
     protected override void OnInitialized()
     {
-        var context = HttpContextAccessor.HttpContext;
-        if (context is not null)
-        {
-            _isTrusted = TrustedNetworkService.IsTrustedAddress(context.Connection.RemoteIpAddress);
-            _isAuthenticated = context.User.Identity?.IsAuthenticated == true;
-            _userName = context.User.Identity?.Name ?? string.Empty;
-        }
-
         LoadPresets();
         PresetStore.Changed += OnPresetsChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(NavigationManager.BaseUri) };
+            var status = await client.GetFromJsonAsync<AuthStatusResponse>("/api/auth/status");
+            if (status is null)
+            {
+                return;
+            }
+
+            _isTrusted = status.TrustedNetwork;
+            _isAuthenticated = status.IsAuthenticated;
+            _userName = status.Email ?? string.Empty;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+        }
     }
 
     private void LoadPresets()

@@ -103,7 +103,7 @@
 
     private string Transport { get; set; } = "ts";
     private string Engine { get; set; } = "mpegts";
-    private string StreamUrl { get; set; } = "http://192.168.15.169/hd.ts";
+    private string StreamUrl { get; set; } = "http://encoder.local/hd.ts";
     private bool UseHlsProxy { get; set; } = true;
     private string ResolvedUrl { get; set; } = string.Empty;
     private string EngineStatus { get; set; } = "mpegts.js";
@@ -131,7 +131,7 @@
     private async Task OnTransportChangedAsync()
     {
         Engine = Transport == "hls" ? "hlsjs" : "mpegts";
-        StreamUrl = Transport == "hls" ? "http://192.168.15.169/0.m3u8" : "http://192.168.15.169/hd.ts";
+        StreamUrl = Transport == "hls" ? "http://encoder.local/stream.m3u8" : "http://encoder.local/hd.ts";
         Status = "Idle";
         LogText = string.Empty;
         ResolvedUrl = string.Empty;

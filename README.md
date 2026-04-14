@@ -1,33 +1,46 @@
-# HomeSkyQLiveStreamingPlayer
+# Home Sky Q Live Streaming Player
 
-Recommended install on Linux:
+Blazor Server application for securely viewing and controlling a live home Sky Q box over the internet with low latency.
+
+## Recommended Linux Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo REPO_BRANCH=main bash
+curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
 ```
 
 Fallback:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo REPO_BRANCH=main bash
+wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
 ```
 
-If you already have a broken install or root-owned checkout from an earlier run, clean it up first:
+Detailed Linux deployment notes are in [LINUX-INSTALL.md](LINUX-INSTALL.md).
 
-```bash
-sudo systemctl stop SkyStreamingService 2>/dev/null || true
-sudo rm -rf /usr/local/src/homeskyqlivestreamingplayer
-curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo REPO_BRANCH=main bash
-```
+## What It Does
 
-The installer will:
+- discovers Sky Q boxes on the local private network
+- sends Sky Q remote-control commands over the LAN control socket
+- plays browser-friendly direct streams such as MPEG-TS or HLS
+- supports FFmpeg-managed ingest/transcode for awkward HTTP or RTSP sources
+- stores presets that bind a stream source to a specific Sky Q box
 
-- clone or update the repo
-- install the `.NET 10` SDK if needed
-- install `ffmpeg` if needed
-- build and publish the app
-- install and start the `SkyStreamingService` systemd service
-- print the local setup and login URLs
+## Security Model
+
+- trusted setup is limited to localhost, RFC1918 private networks, and Tailscale
+- external users authenticate with enrolled TOTP authenticator codes
+- the recommended deployment model is to keep the app private and place Tailscale or Cloudflare Zero Trust in front of it
+
+## Linux Installer Summary
+
+The bootstrap installer:
+
+- clones or updates the public repo
+- installs `ffmpeg` if needed
+- installs the `.NET 10` SDK if needed
+- publishes the app in `Release`
+- deploys it to `/opt/skystreamingservice/app`
+- installs and enables the `SkyStreamingService` systemd service
+- preserves local runtime state across upgrades
 
 After install, open:
 
@@ -39,6 +52,12 @@ From there:
 
 1. Confirm the FFmpeg path.
 2. Save setup.
-3. Enter your email address.
-4. Generate the authenticator QR code.
+3. Enter the email address to enroll for remote access.
+4. Generate and scan the authenticator QR code.
 5. External users then sign in at `/auth/login`.
+
+## Notes
+
+- FFmpeg is not bundled. Install it locally and save the detected path on the `Setup` page.
+- Browser HEVC/H.265 support still varies by browser and platform. `H.264` remains the safer compatibility option.
+- Machine-local runtime files such as auth settings, presets, cache data, and transcoder state are intentionally not published in the public repo.

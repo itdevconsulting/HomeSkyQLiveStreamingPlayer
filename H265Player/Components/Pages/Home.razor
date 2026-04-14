@@ -1,8 +1,6 @@
 @page "/"
-@inject IHttpContextAccessor HttpContextAccessor
 @inject IJSRuntime JS
 @inject LocalSetupStore LocalSetupStore
-@inject TrustedNetworkService TrustedNetworkService
 
 <PageTitle>Home</PageTitle>
 
@@ -81,27 +79,40 @@
         "Sky Q is separate from video playback. It scans the local private network for Sky Q boxes and exposes remote control buttons."
     ];
 
-    private string AccessStatus { get; set; } = "Unknown";
+    private string AccessStatus { get; set; } = "Loading";
     private bool ShowLogout { get; set; }
 
-    protected override void OnInitialized()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var context = HttpContextAccessor.HttpContext;
-        if (context is null)
+        if (!firstRender)
         {
             return;
         }
 
-        if (TrustedNetworkService.IsTrustedRequest(context))
+        try
         {
-            AccessStatus = "Trusted network";
-            return;
-        }
+            using var client = new HttpClient { BaseAddress = new Uri(NavigationManager.BaseUri) };
+            var status = await client.GetFromJsonAsync<AuthStatusResponse>("/api/auth/status");
+            if (status is null)
+            {
+                AccessStatus = "Unknown";
+                return;
+            }
 
-        AccessStatus = context.User.Identity?.IsAuthenticated == true
-            ? $"Authenticator session ({context.User.Identity?.Name})"
-            : "External login required";
-        ShowLogout = context.User.Identity?.IsAuthenticated == true;
+            AccessStatus = status.TrustedNetwork
+                ? "Trusted network"
+                : status.IsAuthenticated
+                    ? string.IsNullOrWhiteSpace(status.Email)
+                        ? "Authenticator session"
+                        : $"Authenticator session ({status.Email})"
+                : "External login required";
+            ShowLogout = status.IsAuthenticated && !status.TrustedNetwork;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            AccessStatus = "Unknown";
+        }
     }
 
     private async Task LogoutAsync()

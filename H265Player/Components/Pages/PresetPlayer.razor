@@ -79,7 +79,7 @@ else
             <span>@RemoteTitle</span>
             <span>@_status</span>
             <span>@_lastCommand</span>
-            <span class="preset-meta-url">@_preset.StreamUrl</span>
+            <span class="preset-meta-url">@PresetLabel</span>
         </div>
     </section>
     }
@@ -112,9 +112,13 @@ else
     private string RemoteTitle =>
         _preset is null
             ? "Sky Q"
-            : string.IsNullOrWhiteSpace(_preset.SkyQHostName)
-                ? _preset.SkyQHost
-                : $"{_preset.SkyQHostName} ({_preset.SkyQHost})";
+            : !string.IsNullOrWhiteSpace(_preset.SkyQHostName)
+                ? _preset.SkyQHostName
+                : !string.IsNullOrWhiteSpace(_preset.SkyQModel)
+                    ? _preset.SkyQModel
+                    : "Sky Q";
+
+    private string PresetLabel => _preset?.Name ?? string.Empty;
 
     private string ManagedHostStyle => _managedHostStyle;
     private string VideoHostStyle => _videoHostStyle;

@@ -74,7 +74,7 @@
         "If H.264 HLS works but H.265 HLS does not, that usually points to browser codec support rather than the page logic."
     ];
 
-    private string HlsUrl { get; set; } = "http://192.168.15.169/0.m3u8";
+    private string HlsUrl { get; set; } = "http://encoder.local/stream.m3u8";
     private bool UseProxy { get; set; } = true;
     private string ResolvedUrl =>
         UseProxy

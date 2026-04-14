@@ -29,7 +29,9 @@ builder.Services.AddHttpClient("skyq")
         AllowAutoRedirect = false,
         AutomaticDecompression = DecompressionMethods.None,
         UseProxy = false
-    });
+    })
+    // Sky Q discovery intentionally probes many private IPs; connection refusals are expected.
+    .RemoveAllLoggers();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddHttpContextAccessor();

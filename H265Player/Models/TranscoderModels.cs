@@ -22,7 +22,7 @@ public sealed record TranscoderSettings(
 public sealed class TranscoderDefaults
 {
     public string FfmpegPath { get; init; } = "ffmpeg.exe";
-    public string InputUrl { get; init; } = "http://192.168.15.169/hd.ts";
+    public string InputUrl { get; init; } = "http://encoder.local/hd.ts";
     public string VideoCodec { get; init; } = "libx264";
     public string Preset { get; init; } = "browser-safe-h264";
     public string AudioMode { get; init; } = "none";
