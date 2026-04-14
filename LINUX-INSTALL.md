@@ -22,6 +22,7 @@ sudo ./scripts/install-linux.sh
 What it does:
 
 - clones or updates `https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer`
+- hard-resets and cleans the source checkout on re-runs so it matches the latest remote branch exactly
 - installs FFmpeg if `ffmpeg` is missing
 - installs the `.NET 10` SDK if no `10.x` SDK is available
 - publishes the app in `Release`

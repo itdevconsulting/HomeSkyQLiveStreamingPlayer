@@ -91,8 +91,11 @@ sync_checkout() {
     log "Updating existing checkout in $CHECKOUT_DIR"
     git -C "$CHECKOUT_DIR" remote set-url origin "$REPO_URL"
     git -C "$CHECKOUT_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    git -C "$CHECKOUT_DIR" reset --hard HEAD
+    git -C "$CHECKOUT_DIR" clean -fd
     git -C "$CHECKOUT_DIR" checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
     git -C "$CHECKOUT_DIR" reset --hard "origin/$REPO_BRANCH"
+    git -C "$CHECKOUT_DIR" clean -fd
     chown -R "$BUILD_USER:$BUILD_GROUP" "$CHECKOUT_DIR"
 }
 

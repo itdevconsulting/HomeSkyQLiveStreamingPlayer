@@ -35,6 +35,7 @@ Detailed Linux deployment notes are in [LINUX-INSTALL.md](LINUX-INSTALL.md).
 The bootstrap installer:
 
 - clones or updates the public repo
+- hard-resets and cleans the source checkout on re-runs so it matches the latest remote branch exactly
 - installs `ffmpeg` if needed
 - installs the `.NET 10` SDK if needed
 - publishes the app in `Release`
