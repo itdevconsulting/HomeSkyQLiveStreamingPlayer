@@ -242,6 +242,16 @@
                 ? "No scan result returned."
                 : $"Scanned: {string.Join(", ", ScanResult.Networks)}{Environment.NewLine}Found: {ScanResult.Devices.Count}{Environment.NewLine}Last scan: {ScanResult.LastScanAt?.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
         }
+        catch (Exception ex)
+        {
+            CommandStatus = "Scan failed";
+            ScanResult ??= new SkyQScanResponse();
+            ScanResult.SkippedNetworks =
+            [
+                $"Sky Q scan failed: {ex.Message}"
+            ];
+            LogText = $"Sky Q scan failed.{Environment.NewLine}{ex.GetType().Name}: {ex.Message}";
+        }
         finally
         {
             IsBusy = false;
