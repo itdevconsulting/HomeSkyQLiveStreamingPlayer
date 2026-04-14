@@ -287,6 +287,17 @@ deploy_app() {
     chmod -R u=rwX,g=rX,o= "$APP_DIR"
 }
 
+stop_existing_service() {
+    if [[ ! -f "$SERVICE_FILE" ]]; then
+        return
+    fi
+
+    if systemctl is-active --quiet "$APP_NAME"; then
+        log "Stopping existing service"
+        systemctl stop "$APP_NAME"
+    fi
+}
+
 write_service_unit() {
     cat >"$SERVICE_FILE" <<EOF
 [Unit]
@@ -314,7 +325,7 @@ ProtectControlGroups=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
 RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 LockPersonality=true
 UMask=0027
 
@@ -429,6 +440,8 @@ main() {
 
     log "Publishing application"
     run_publish
+
+    stop_existing_service
 
     log "Deploying application"
     deploy_app

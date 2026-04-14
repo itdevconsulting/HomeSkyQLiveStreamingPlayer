@@ -38,8 +38,9 @@ The bootstrap installer:
 - installs `ffmpeg` if needed
 - installs the `.NET 10` SDK if needed
 - publishes the app in `Release`
-- deploys it to `/opt/skystreamingservice/app`
-- installs and enables the `SkyStreamingService` systemd service
+- stops `SkyStreamingService` before replacing the deployed app
+- fully replaces `/opt/skystreamingservice/app` with the latest published build
+- writes or updates the `SkyStreamingService` systemd service and restarts it
 - preserves local runtime state across upgrades
 
 After install, open:

@@ -25,8 +25,9 @@ What it does:
 - installs FFmpeg if `ffmpeg` is missing
 - installs the `.NET 10` SDK if no `10.x` SDK is available
 - publishes the app in `Release`
-- deploys it to `/opt/skystreamingservice/app`
-- creates and enables the `SkyStreamingService` systemd service
+- stops `SkyStreamingService` before replacing the deployed app
+- fully replaces `/opt/skystreamingservice/app` with the latest published build
+- writes or updates the `SkyStreamingService` systemd service and restarts it
 - preserves local app state on re-runs:
   - `local-settings.json`
   - `auth-settings.json`
