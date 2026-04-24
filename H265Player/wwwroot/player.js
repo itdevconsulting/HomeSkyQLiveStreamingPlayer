@@ -58,6 +58,41 @@ function unmuteManagedHost(hostId) {
     video.removeAttribute("muted");
 }
 
+function clampBufferingLevel(level) {
+    const parsed = Number.parseInt(level, 10);
+    if (Number.isNaN(parsed)) {
+        return 5;
+    }
+
+    return Math.min(5, Math.max(1, parsed));
+}
+
+function getBufferingProfile(level) {
+    const value = clampBufferingLevel(level);
+    const labels = ["Min", "Low", "Med", "High", "Max"];
+    const mpegtsProfiles = [
+        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 1.5, liveBufferLatencyMinRemain: 0.3, stashInitialSize: 128 },
+        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 2.2, liveBufferLatencyMinRemain: 0.55, stashInitialSize: 256 },
+        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 3.1, liveBufferLatencyMinRemain: 0.9, stashInitialSize: 384 },
+        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 4.2, liveBufferLatencyMinRemain: 1.25, stashInitialSize: 768 },
+        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: false, liveBufferLatencyMaxLatency: 5.4, liveBufferLatencyMinRemain: 1.8, stashInitialSize: 1024 }
+    ];
+    const hlsProfiles = [
+        { lowLatencyMode: true, backBufferLength: 15, maxBufferLength: 10, maxMaxBufferLength: 20, initialLiveManifestSize: 1, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 2 },
+        { lowLatencyMode: true, backBufferLength: 20, maxBufferLength: 15, maxMaxBufferLength: 30, initialLiveManifestSize: 1, liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 3 },
+        { lowLatencyMode: true, backBufferLength: 25, maxBufferLength: 20, maxMaxBufferLength: 40, initialLiveManifestSize: 2, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 4 },
+        { lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 28, maxMaxBufferLength: 50, initialLiveManifestSize: 3, liveSyncDurationCount: 4, liveMaxLatencyDurationCount: 5 },
+        { lowLatencyMode: false, backBufferLength: 40, maxBufferLength: 36, maxMaxBufferLength: 60, initialLiveManifestSize: 4, liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 7 }
+    ];
+
+    return {
+        value,
+        label: labels[value - 1],
+        mpegts: mpegtsProfiles[value - 1],
+        hls: hlsProfiles[value - 1]
+    };
+}
+
 window.h265App = {
     _directPlayers: {},
     _ffmpegPlayer: null,
@@ -112,16 +147,17 @@ window.h265App = {
         return `/hls-proxy/playlist?url=${encodeURIComponent(streamUrl)}`;
     },
 
-    directLoad(streamUrl, dotNetRef) {
-        return this.directLoadToElement("direct-player-host", streamUrl, dotNetRef);
+    directLoad(streamUrl, dotNetRef, bufferingLevel = 5) {
+        return this.directLoadToElement("direct-player-host", streamUrl, dotNetRef, bufferingLevel);
     },
 
-    directLoadToElement(elementId, streamUrl, dotNetRef) {
+    directLoadToElement(elementId, streamUrl, dotNetRef, bufferingLevel = 5) {
         this.directReleaseElement(elementId);
         const proxiedUrl = this.getProxyUrl(streamUrl);
         const absoluteUrl = `${window.location.origin}${proxiedUrl}`;
         const video = document.getElementById(elementId);
         const callbacks = dotNetRef || null;
+        const buffering = getBufferingProfile(bufferingLevel);
         if (!video) {
             return { proxyUrl: proxiedUrl, status: "Video element missing" };
         }
@@ -133,19 +169,13 @@ window.h265App = {
         }
 
         callbacks?.invokeMethodAsync("OnDirectStatusChanged", "Loading");
-        callbacks?.invokeMethodAsync("OnDirectLog", `Opening ${absoluteUrl}`);
+        callbacks?.invokeMethodAsync("OnDirectLog", `Opening ${absoluteUrl} with ${buffering.label} buffering`);
 
         const player = window.mpegts.createPlayer({
             type: "mpegts",
             isLive: true,
             url: absoluteUrl
-        }, {
-            enableWorker: false,
-            liveBufferLatencyChasing: true,
-            liveBufferLatencyMaxLatency: 2,
-            liveBufferLatencyMinRemain: 0.5,
-            stashInitialSize: 128
-        });
+        }, buffering.mpegts);
 
         player.attachMediaElement(video);
         player.load();
@@ -477,14 +507,15 @@ window.h265App = {
         };
     },
 
-    hlsLoad(streamUrl, useProxy) {
-        return this.hlsLoadToElement("hls-video", streamUrl, useProxy);
+    hlsLoad(streamUrl, useProxy, bufferingLevel = 5) {
+        return this.hlsLoadToElement("hls-video", streamUrl, useProxy, bufferingLevel);
     },
 
-    hlsLoadToElement(elementId, streamUrl, useProxy) {
+    hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel = 5) {
         this.hlsRelease();
         const resolvedUrl = useProxy ? this.getHlsProxyUrl(streamUrl) : streamUrl;
         const video = document.getElementById(elementId);
+        const buffering = getBufferingProfile(bufferingLevel);
         if (!video) {
             return { resolvedUrl, framework: "Unavailable", status: "Video element missing" };
         }
@@ -498,10 +529,7 @@ window.h265App = {
         }
 
         if (window.Hls && window.Hls.isSupported()) {
-            const hls = new window.Hls({
-                lowLatencyMode: true,
-                backBufferLength: 30
-            });
+            const hls = new window.Hls(buffering.hls);
             hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
                 this._hlsState.status = "Manifest parsed";
                 this._hlsState.lastError = "";

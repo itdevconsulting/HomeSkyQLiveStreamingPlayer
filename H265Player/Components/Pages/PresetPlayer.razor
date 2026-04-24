@@ -18,11 +18,55 @@
 }
 else
 {
-    <section class="panel">
+    <section class="panel preset-panel">
         <div class="preset-header">
-            <div>
+            <div class="preset-header-toolbar">
+                <div class="preset-icon-group">
+                    <button type="button" class="preset-icon-button preset-icon-button-play" @onclick="GoAsync" title="Play">
+                        <span class="play-icon" aria-hidden="true"></span>
+                    </button>
+                    <SkyQMiniRemote Title="@RemoteTitle" ButtonCssClass="preset-icon-button preset-icon-button-remote" OnCommand="SendCommandAsync">
+                        <ButtonContent>
+                            <span class="remote-icon" aria-hidden="true">
+                                <span class="remote-icon-screen"></span>
+                                <span class="remote-icon-pad"></span>
+                            </span>
+                        </ButtonContent>
+                    </SkyQMiniRemote>
+                </div>
+
+                <div class="preset-icon-group">
+                    <button type="button" class="@GetSizeButtonClass("small")" @onclick="SetSmallVideo" title="Small video">
+                        <span class="size-icon size-icon-small" aria-hidden="true"></span>
+                    </button>
+                    <button type="button" class="@GetSizeButtonClass("medium")" @onclick="SetMediumVideo" title="Medium video">
+                        <span class="size-icon size-icon-medium" aria-hidden="true"></span>
+                    </button>
+                    <button type="button" class="@GetSizeButtonClass("large")" @onclick="SetLargeVideo" title="Large video">
+                        <span class="size-icon size-icon-large" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </div>
+
+            <label class="@GetBufferingControlClass()" title="@BufferingTitle">
+                <span class="preset-buffer-label">Buf</span>
+                <input type="range"
+                       class="preset-buffer-slider"
+                       min="1"
+                       max="5"
+                       step="1"
+                       value="@_bufferingLevel"
+                       style="@GetBufferingSliderStyle()"
+                       disabled="@(!SupportsAdjustableBuffering)"
+                       @oninput="OnBufferingInput"
+                       @onchange="OnBufferingCommittedAsync" />
+                <span class="preset-buffer-value">@_bufferingLevel</span>
+            </label>
+
+            <div class="preset-header-main">
                 <h2 class="preset-title">@_preset.Name</h2>
             </div>
+
             <PageInfo Title="Preset Player" Summary="This page opens the saved source type and binds it to the selected Sky Q box." Items="HelpItems" />
         </div>
     </section>
@@ -42,34 +86,6 @@ else
     else
     {
     <section class="player-panel preset-player-panel">
-        <div class="preset-icon-row">
-            <div class="preset-icon-group preset-icon-group-left">
-                <button type="button" class="preset-icon-button preset-icon-button-play" @onclick="GoAsync" title="Play">
-                    <span class="play-icon" aria-hidden="true"></span>
-                </button>
-                <SkyQMiniRemote Title="@RemoteTitle" ButtonCssClass="preset-icon-button preset-icon-button-remote" OnCommand="SendCommandAsync">
-                    <ButtonContent>
-                        <span class="remote-icon" aria-hidden="true">
-                            <span class="remote-icon-screen"></span>
-                            <span class="remote-icon-pad"></span>
-                        </span>
-                    </ButtonContent>
-                </SkyQMiniRemote>
-            </div>
-
-            <div class="preset-icon-group preset-icon-group-right">
-                <button type="button" class="@GetSizeButtonClass("small")" @onclick="SetSmallVideo" title="Small video">
-                    <span class="size-icon size-icon-small" aria-hidden="true"></span>
-                </button>
-                <button type="button" class="@GetSizeButtonClass("medium")" @onclick="SetMediumVideo" title="Medium video">
-                    <span class="size-icon size-icon-medium" aria-hidden="true"></span>
-                </button>
-                <button type="button" class="@GetSizeButtonClass("large")" @onclick="SetLargeVideo" title="Large video">
-                    <span class="size-icon size-icon-large" aria-hidden="true"></span>
-                </button>
-            </div>
-        </div>
-
         <div class="preset-video-shell @($"preset-video-{_videoSize}")">
             <div id="preset-managed-host" class="player-host" style="@ManagedHostStyle"></div>
             <video id="preset-player-host" class="video-host" style="@VideoHostStyle" controls playsinline></video>
@@ -79,7 +95,7 @@ else
             <span>@RemoteTitle</span>
             <span>@_status</span>
             <span>@_lastCommand</span>
-            <span class="preset-meta-url">@PresetLabel</span>
+            <span class="preset-meta-url">@_preset.StreamUrl</span>
         </div>
     </section>
     }
@@ -93,6 +109,7 @@ else
     [
         "Go tears down any existing player on this screen and starts the saved source again using its configured source type.",
         "Direct presets use the raw TS browser path, HLS presets use the HLS browser path, and FFmpeg or RTSP presets restart the managed transcoder before playing the output.",
+        "Buffer sets one of five browser buffering presets for Direct and HLS playback. Higher values trade latency for stability.",
         "Remote opens a draggable mini Sky Q remote tied to the saved box for this preset.",
         "When the remote is open and focused, number keys send digits, cursor keys navigate, Enter selects, and Space sends pause.",
         "Edit names, stream URLs, or box associations on the Presets page."
@@ -103,30 +120,43 @@ else
     private string _logText = string.Empty;
     private string _lastCommand = "None";
     private string _videoSize = "medium";
+    private int _bufferingLevel = 5;
+    private bool _bufferingDirty;
+    private bool _hasLoadedPlayer;
     private string _managedHostStyle = "display:none";
     private string _videoHostStyle = "";
     private bool _pendingAutoLoad;
     private DotNetObjectReference<PresetPlayer>? _dotNetRef;
     private bool RequiresSetup => _preset is { SourceType: "ffmpeg" or "rtsp" } && !LocalSetupStore.IsConfigured();
+    private bool SupportsAdjustableBuffering => _preset is { SourceType: "direct" or "hls" };
 
     private string RemoteTitle =>
         _preset is null
             ? "Sky Q"
-            : !string.IsNullOrWhiteSpace(_preset.SkyQHostName)
-                ? _preset.SkyQHostName
-                : !string.IsNullOrWhiteSpace(_preset.SkyQModel)
-                    ? _preset.SkyQModel
-                    : "Sky Q";
-
-    private string PresetLabel => _preset?.Name ?? string.Empty;
+            : string.IsNullOrWhiteSpace(_preset.SkyQHostName)
+                ? _preset.SkyQHost
+                : $"{_preset.SkyQHostName} ({_preset.SkyQHost})";
 
     private string ManagedHostStyle => _managedHostStyle;
     private string VideoHostStyle => _videoHostStyle;
+    private string BufferingLabel => _bufferingLevel switch
+    {
+        1 => "Min",
+        2 => "Low",
+        3 => "Med",
+        4 => "High",
+        _ => "Max"
+    };
+    private string BufferingTitle =>
+        SupportsAdjustableBuffering
+            ? $"Buffering {BufferingLabel} ({_bufferingLevel}/5)"
+            : $"Buffering {BufferingLabel} ({_bufferingLevel}/5). Applies to Direct and HLS presets.";
 
     protected override void OnParametersSet()
     {
         _preset = PresetStore.Get(Id);
         _pendingAutoLoad = _preset is not null;
+        _hasLoadedPlayer = false;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -156,9 +186,10 @@ else
             case "hls":
                 _managedHostStyle = "display:none";
                 _videoHostStyle = "";
-                var hlsResult = await JS.InvokeAsync<HlsLoadResult>("h265App.hlsLoadToElement", "preset-player-host", _preset.StreamUrl, _preset.UseHlsProxy);
+                var hlsResult = await JS.InvokeAsync<HlsLoadResult>("h265App.hlsLoadToElement", "preset-player-host", _preset.StreamUrl, _preset.UseHlsProxy, _bufferingLevel);
                 _status = hlsResult.Status;
                 _logText = $"Starting {hlsResult.ResolvedUrl}";
+                _hasLoadedPlayer = true;
                 break;
 
             case "ffmpeg":
@@ -166,14 +197,16 @@ else
                 _managedHostStyle = "";
                 _videoHostStyle = "display:none";
                 await StartManagedPresetAsync();
+                _hasLoadedPlayer = true;
                 break;
 
             default:
                 _managedHostStyle = "display:none";
                 _videoHostStyle = "";
-                var directResult = await JS.InvokeAsync<DirectLoadResult>("h265App.directLoadToElement", "preset-player-host", _preset.StreamUrl, _dotNetRef);
+                var directResult = await JS.InvokeAsync<DirectLoadResult>("h265App.directLoadToElement", "preset-player-host", _preset.StreamUrl, _dotNetRef, _bufferingLevel);
                 _status = directResult.Status;
                 _logText = $"Starting {directResult.ProxyUrl}";
+                _hasLoadedPlayer = true;
                 break;
         }
 
@@ -261,6 +294,58 @@ else
 
     private string GetSizeButtonClass(string size) =>
         _videoSize == size ? "preset-icon-button preset-size-button active" : "preset-icon-button preset-size-button";
+
+    private string GetBufferingControlClass() =>
+        SupportsAdjustableBuffering ? "preset-buffer-control" : "preset-buffer-control preset-buffer-control-disabled";
+
+    private string GetBufferingSliderStyle() => $"--buffer-fill:{(_bufferingLevel - 1) * 25}%;";
+
+    private void OnBufferingInput(ChangeEventArgs args)
+    {
+        if (TryUpdateBufferingLevel(args))
+        {
+            _bufferingDirty = true;
+        }
+    }
+
+    private async Task OnBufferingCommittedAsync(ChangeEventArgs args)
+    {
+        if (TryUpdateBufferingLevel(args))
+        {
+            _bufferingDirty = true;
+        }
+
+        if (!_bufferingDirty)
+        {
+            return;
+        }
+
+        _bufferingDirty = false;
+
+        if (!_hasLoadedPlayer || !SupportsAdjustableBuffering)
+        {
+            return;
+        }
+
+        await GoAsync();
+    }
+
+    private bool TryUpdateBufferingLevel(ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out var parsed))
+        {
+            return false;
+        }
+
+        var normalized = Math.Clamp(parsed, 1, 5);
+        if (normalized == _bufferingLevel)
+        {
+            return false;
+        }
+
+        _bufferingLevel = normalized;
+        return true;
+    }
 
     [JSInvokable]
     public Task OnDirectStatusChanged(string status)
