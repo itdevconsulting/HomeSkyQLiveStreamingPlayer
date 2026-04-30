@@ -1,4 +1,40 @@
 const sdkBaseUrl = "/h265web/";
+const playbackWatchdogDefaults = {
+    direct: {
+        enabled: true,
+        checkIntervalMs: 3000,
+        stallAfterMs: 10000
+    },
+    hls: {
+        enabled: true,
+        checkIntervalMs: 5000,
+        stallAfterMs: 15000
+    }
+};
+
+function clampWatchdogSeconds(value, fallbackSeconds, minSeconds, maxSeconds) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        return fallbackSeconds;
+    }
+
+    return Math.min(maxSeconds, Math.max(minSeconds, parsed));
+}
+
+function normalizeWatchdogOptions(kind, options) {
+    const defaults = playbackWatchdogDefaults[kind] || playbackWatchdogDefaults.hls;
+    const checkIntervalSeconds = clampWatchdogSeconds(options?.checkIntervalSeconds, defaults.checkIntervalMs / 1000, 1, 30);
+    const stallSeconds = Math.max(
+        clampWatchdogSeconds(options?.stallSeconds, defaults.stallAfterMs / 1000, 2, 120),
+        checkIntervalSeconds + 1
+    );
+
+    return {
+        enabled: typeof options?.enabled === "boolean" ? options.enabled : defaults.enabled,
+        checkIntervalMs: checkIntervalSeconds * 1000,
+        stallAfterMs: stallSeconds * 1000
+    };
+}
 
 function buildManagedPlayer(hostId, onStatus, onLog, url, autoPlay, ignoreAudio) {
     const player = H265webjsPlayer();
@@ -104,6 +140,7 @@ window.h265App = {
     _altTsPlayer: null,
     _altHls: null,
     _altVideoJs: null,
+    _streamWatchdogs: {},
     _hlsState: {
         framework: "Idle",
         status: "Idle",
@@ -147,17 +184,86 @@ window.h265App = {
         return `/hls-proxy/playlist?url=${encodeURIComponent(streamUrl)}`;
     },
 
-    directLoad(streamUrl, dotNetRef, bufferingLevel = 5) {
-        return this.directLoadToElement("direct-player-host", streamUrl, dotNetRef, bufferingLevel);
+    _clearWatchdog(key) {
+        const timer = this._streamWatchdogs[key];
+        if (timer) {
+            window.clearInterval(timer);
+            delete this._streamWatchdogs[key];
+        }
     },
 
-    directLoadToElement(elementId, streamUrl, dotNetRef, bufferingLevel = 5) {
+    _getBufferedEnd(video) {
+        try {
+            return video.buffered && video.buffered.length > 0
+                ? video.buffered.end(video.buffered.length - 1)
+                : null;
+        } catch {
+            return null;
+        }
+    },
+
+    _armVideoWatchdog(key, getVideo, onStall, options) {
+        this._clearWatchdog(key);
+
+        if (!options?.enabled) {
+            return;
+        }
+
+        let lastTime = null;
+        let lastBufferedEnd = null;
+        let lastProgressAt = Date.now();
+
+        this._streamWatchdogs[key] = window.setInterval(() => {
+            const video = getVideo();
+            if (!video) {
+                return;
+            }
+
+            const now = Date.now();
+            const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+            const bufferedEnd = this._getBufferedEnd(video);
+
+            if (video.paused || video.ended || video.seeking) {
+                lastTime = currentTime;
+                lastBufferedEnd = bufferedEnd;
+                lastProgressAt = now;
+                return;
+            }
+
+            const timeProgressed = lastTime === null ? false : currentTime > lastTime + 0.1;
+            const bufferProgressed = lastBufferedEnd === null || bufferedEnd === null
+                ? false
+                : bufferedEnd > lastBufferedEnd + 0.25;
+
+            if (lastTime === null || timeProgressed || bufferProgressed) {
+                lastProgressAt = now;
+            }
+
+            lastTime = currentTime;
+            lastBufferedEnd = bufferedEnd;
+
+            const stalledForMs = now - lastProgressAt;
+            if (stalledForMs < options.stallAfterMs) {
+                return;
+            }
+
+            lastProgressAt = now;
+            onStall(stalledForMs);
+        }, options.checkIntervalMs);
+    },
+
+    directLoad(streamUrl, dotNetRef, bufferingLevel = 5, watchdogOptions = null) {
+        return this.directLoadToElement("direct-player-host", streamUrl, dotNetRef, bufferingLevel, watchdogOptions);
+    },
+
+    directLoadToElement(elementId, streamUrl, dotNetRef, bufferingLevel = 5, watchdogOptions = null) {
         this.directReleaseElement(elementId);
         const proxiedUrl = this.getProxyUrl(streamUrl);
         const absoluteUrl = `${window.location.origin}${proxiedUrl}`;
         const video = document.getElementById(elementId);
         const callbacks = dotNetRef || null;
         const buffering = getBufferingProfile(bufferingLevel);
+        const watchdog = normalizeWatchdogOptions("direct", watchdogOptions);
         if (!video) {
             return { proxyUrl: proxiedUrl, status: "Video element missing" };
         }
@@ -202,6 +308,17 @@ window.h265App = {
         }, { once: true });
 
         this._directPlayers[elementId] = { player, callbacks };
+        this._armVideoWatchdog(`direct:${elementId}`, () => document.getElementById(elementId), (stalledForMs) => {
+            const entry = this._directPlayers[elementId];
+            if (!entry || entry.restarting) {
+                return;
+            }
+
+            entry.restarting = true;
+            callbacks?.invokeMethodAsync("OnDirectStatusChanged", "Watchdog restart");
+            callbacks?.invokeMethodAsync("OnDirectLog", `No media progress for ${Math.round(stalledForMs / 1000)}s. Reopening proxied stream.`);
+            this.directLoadToElement(elementId, streamUrl, dotNetRef, bufferingLevel, watchdogOptions);
+        }, watchdog);
         return { proxyUrl: proxiedUrl, status: "Loading" };
     },
 
@@ -220,6 +337,7 @@ window.h265App = {
     directReleaseElement(elementId) {
         const entry = this._directPlayers[elementId];
         const video = document.getElementById(elementId);
+        this._clearWatchdog(`direct:${elementId}`);
         entry?.player.pause?.();
         entry?.player.unload?.();
         entry?.player.detachMediaElement?.();
@@ -507,15 +625,16 @@ window.h265App = {
         };
     },
 
-    hlsLoad(streamUrl, useProxy, bufferingLevel = 5) {
-        return this.hlsLoadToElement("hls-video", streamUrl, useProxy, bufferingLevel);
+    hlsLoad(streamUrl, useProxy, bufferingLevel = 5, watchdogOptions = null) {
+        return this.hlsLoadToElement("hls-video", streamUrl, useProxy, bufferingLevel, watchdogOptions);
     },
 
-    hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel = 5) {
+    hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel = 5, watchdogOptions = null) {
         this.hlsRelease();
         const resolvedUrl = useProxy ? this.getHlsProxyUrl(streamUrl) : streamUrl;
         const video = document.getElementById(elementId);
         const buffering = getBufferingProfile(bufferingLevel);
+        const watchdog = normalizeWatchdogOptions("hls", watchdogOptions);
         if (!video) {
             return { resolvedUrl, framework: "Unavailable", status: "Video element missing" };
         }
@@ -525,6 +644,20 @@ window.h265App = {
             video.play().catch(() => null);
             this._hlsState = { framework: "Native HLS", status: "Loaded", lastError: "" };
             this._hlsPlayers[elementId] = { kind: "native" };
+            this._armVideoWatchdog(`hls:${elementId}`, () => document.getElementById(elementId), (stalledForMs) => {
+                const entry = this._hlsPlayers[elementId];
+                if (!entry || entry.restarting) {
+                    return;
+                }
+
+                entry.restarting = true;
+                this._hlsState = {
+                    framework: "Native HLS",
+                    status: "Watchdog restart",
+                    lastError: `No media progress for ${Math.round(stalledForMs / 1000)}s. Reloading stream.`
+                };
+                this.hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel, watchdogOptions);
+            }, watchdog);
             return { resolvedUrl, framework: "Native HLS", status: "Loaded" };
         }
 
@@ -546,6 +679,20 @@ window.h265App = {
             this._hls = hls;
             this._hlsPlayers[elementId] = { kind: "hls", player: hls };
             this._hlsState = { framework: "hls.js", status: "Loading", lastError: "" };
+            this._armVideoWatchdog(`hls:${elementId}`, () => document.getElementById(elementId), (stalledForMs) => {
+                const entry = this._hlsPlayers[elementId];
+                if (!entry || entry.restarting) {
+                    return;
+                }
+
+                entry.restarting = true;
+                this._hlsState = {
+                    framework: "hls.js",
+                    status: "Watchdog restart",
+                    lastError: `No media progress for ${Math.round(stalledForMs / 1000)}s. Reloading stream.`
+                };
+                this.hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel, watchdogOptions);
+            }, watchdog);
             return { resolvedUrl, framework: "hls.js", status: "Loading" };
         }
 
@@ -580,6 +727,7 @@ window.h265App = {
     },
 
     hlsRelease() {
+        this._clearWatchdog("hls:hls-video");
         if (this._hls) {
             this._hls.destroy();
             this._hls = null;
@@ -598,6 +746,7 @@ window.h265App = {
 
     hlsReleaseElement(elementId) {
         const entry = this._hlsPlayers[elementId];
+        this._clearWatchdog(`hls:${elementId}`);
         if (entry?.player) {
             entry.player.destroy();
         }
@@ -781,6 +930,17 @@ window.h265Auth = {
             method: "POST",
             body: JSON.stringify(payload)
         });
+    },
+
+    async resetSession() {
+        return this.fetchJson("/api/auth/reset", {
+            method: "POST"
+        });
+    },
+
+    async resetSessionAndGetStatus() {
+        await this.resetSession();
+        return this.fetchJson("/api/auth/status");
     },
 
     async logout() {

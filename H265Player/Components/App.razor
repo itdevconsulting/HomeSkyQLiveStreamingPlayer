@@ -586,6 +586,12 @@ button:hover {
     filter: brightness(1.06);
 }
 
+button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    filter: none;
+}
+
 .status-grid {
     margin-top: 1rem;
     display: grid;
@@ -1474,10 +1480,16 @@ code {
     color: #d8ffe4;
 }
 
+.setup-service-grid,
 .setup-auth-grid {
     margin-top: 1.4rem;
     display: grid;
     gap: 1rem;
+}
+
+.setup-status-meta {
+    color: var(--muted);
+    font-size: 0.84rem;
 }
 
 .auth-panel {
@@ -1649,7 +1661,7 @@ code {
     <script src="/vendor/mpegts.min.js"></script>
     <script src="/vendor/hls.min.js"></script>
     <script src="/vendor/video.min.js"></script>
-    <script src="/player.js?v=20260413-auth3"></script>
+    <script src="/player.js?v=20260430-auth4"></script>
     <script src="/_framework/blazor.web.js"></script>
 </body>
 </html>

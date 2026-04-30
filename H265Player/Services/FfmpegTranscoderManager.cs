@@ -8,26 +8,47 @@ public sealed class FfmpegTranscoderManager : IDisposable
 {
     private readonly object _gate = new();
     private readonly string _pidFilePath;
+    private readonly ILogger<FfmpegTranscoderManager> _logger;
+    private readonly TranscoderWatchdogOptions _watchdogOptions;
     private Process? _process;
     private List<string> _logs = [];
     private string? _outputDirectory;
+    private string? _manifestPath;
     private DateTimeOffset? _startedAt;
+    private DateTimeOffset? _lastOutputAt;
+    private string? _lastRestartReason;
     private CancellationTokenSource? _restartCts;
+    private CancellationTokenSource? _watchdogCts;
     private bool _manualStop;
     private TranscoderSettings? _currentSettings;
 
-    public FfmpegTranscoderManager(IHostEnvironment environment)
+    public FfmpegTranscoderManager(
+        IHostEnvironment environment,
+        IConfiguration configuration,
+        ILogger<FfmpegTranscoderManager> logger)
     {
         _pidFilePath = Path.Combine(environment.ContentRootPath, "runtime", "ffmpeg.pid");
+        _logger = logger;
+        _watchdogOptions = configuration.GetSection("Transcoder").GetSection("Watchdog").Get<TranscoderWatchdogOptions>() ?? new TranscoderWatchdogOptions();
         TryKillPersistedProcess();
     }
 
     public async Task StartAsync(TranscoderSettings settings, string outputDirectory, CancellationToken cancellationToken)
     {
+        await StartCoreAsync(settings, outputDirectory, cancellationToken, cancelScheduledRestart: true, resetLogs: true);
+    }
+
+    private async Task StartCoreAsync(
+        TranscoderSettings settings,
+        string outputDirectory,
+        CancellationToken cancellationToken,
+        bool cancelScheduledRestart,
+        bool resetLogs)
+    {
         var resolvedPath = FfmpegPathResolver.ResolveOrThrow(settings.FfmpegPath);
         var manifestPath = Path.Combine(outputDirectory, "stream.m3u8");
 
-        Stop();
+        Stop(cancelScheduledRestart);
         TryKillPersistedProcess();
         PrepareOutputDirectory(outputDirectory);
 
@@ -35,11 +56,18 @@ public sealed class FfmpegTranscoderManager : IDisposable
 
         lock (_gate)
         {
-            _logs = [];
+            if (resetLogs)
+            {
+                _logs = [];
+                _lastRestartReason = null;
+            }
+
             _manualStop = false;
             _outputDirectory = outputDirectory;
+            _manifestPath = manifestPath;
             _currentSettings = settings with { FfmpegPath = resolvedPath };
             _startedAt = DateTimeOffset.UtcNow;
+            _lastOutputAt = null;
             _process = process;
         }
 
@@ -55,18 +83,32 @@ public sealed class FfmpegTranscoderManager : IDisposable
         process.BeginErrorReadLine();
 
         await WaitForOutputAsync(manifestPath, cancellationToken);
+        UpdateLastOutputAt(GetLatestOutputTimestamp(manifestPath));
+        StartWatchdog(manifestPath);
     }
 
     public void Stop()
+    {
+        Stop(cancelScheduledRestart: true);
+    }
+
+    private void Stop(bool cancelScheduledRestart)
     {
         Process? process;
 
         lock (_gate)
         {
             _manualStop = true;
-            _restartCts?.Cancel();
-            _restartCts?.Dispose();
-            _restartCts = null;
+            if (cancelScheduledRestart)
+            {
+                _restartCts?.Cancel();
+                _restartCts?.Dispose();
+                _restartCts = null;
+            }
+
+            _watchdogCts?.Cancel();
+            _watchdogCts?.Dispose();
+            _watchdogCts = null;
             process = _process;
             _process = null;
         }
@@ -109,7 +151,10 @@ public sealed class FfmpegTranscoderManager : IDisposable
                 StartedAt: _startedAt,
                 ManifestUrl: "/live/stream.m3u8",
                 Settings: _currentSettings,
-                Logs: [.. _logs]);
+                Logs: [.. _logs],
+                WatchdogEnabled: _watchdogOptions.Enabled && _currentSettings?.AutoRestart == true,
+                LastOutputAt: _lastOutputAt,
+                LastRestartReason: _lastRestartReason);
         }
     }
 
@@ -145,42 +190,7 @@ public sealed class FfmpegTranscoderManager : IDisposable
     {
         DeletePersistedProcessId();
         AppendLog($"ffmpeg exited with code {exitCode}");
-
-        TranscoderSettings? settings;
-        string? outputDirectory;
-        CancellationTokenSource restartCts;
-
-        lock (_gate)
-        {
-            if (_manualStop || _currentSettings is null || !_currentSettings.AutoRestart)
-            {
-                return;
-            }
-
-            settings = _currentSettings;
-            outputDirectory = _outputDirectory;
-            _restartCts?.Cancel();
-            _restartCts?.Dispose();
-            _restartCts = new CancellationTokenSource();
-            restartCts = _restartCts;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                AppendLog("auto-restart scheduled in 2 seconds");
-                await Task.Delay(TimeSpan.FromSeconds(2), restartCts.Token);
-                await StartAsync(settings!, outputDirectory!, restartCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                AppendLog($"auto-restart failed: {ex.Message}");
-            }
-        });
+        QueueRestart($"process exit (code {exitCode})", TimeSpan.FromSeconds(2), stopCurrentProcess: false);
     }
 
     private void AppendLog(string? line)
@@ -361,6 +371,7 @@ public sealed class FfmpegTranscoderManager : IDisposable
 
             if (File.Exists(manifestPath))
             {
+                UpdateLastOutputAt(GetLatestOutputTimestamp(manifestPath));
                 return;
             }
 
@@ -386,4 +397,205 @@ public sealed class FfmpegTranscoderManager : IDisposable
 
     private Task WaitForOutputAsync(string manifestPath, CancellationToken cancellationToken) =>
         Task.Run(() => WaitForOutput(manifestPath, cancellationToken), cancellationToken);
+
+    private void StartWatchdog(string manifestPath)
+    {
+        CancellationTokenSource watchdogCts;
+
+        lock (_gate)
+        {
+            _watchdogCts?.Cancel();
+            _watchdogCts?.Dispose();
+
+            if (!_watchdogOptions.Enabled || _currentSettings?.AutoRestart != true)
+            {
+                _watchdogCts = null;
+                return;
+            }
+
+            _watchdogCts = new CancellationTokenSource();
+            watchdogCts = _watchdogCts;
+        }
+
+        _ = Task.Run(() => WatchdogLoopAsync(manifestPath, watchdogCts.Token));
+    }
+
+    private async Task WatchdogLoopAsync(string manifestPath, CancellationToken cancellationToken)
+    {
+        var pollInterval = TimeSpan.FromSeconds(Math.Max(1, _watchdogOptions.PollIntervalSeconds));
+        var startupGrace = TimeSpan.FromSeconds(Math.Max(1, _watchdogOptions.StartupGraceSeconds));
+        var staleThreshold = TimeSpan.FromSeconds(Math.Max(2, _watchdogOptions.StaleOutputSeconds));
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            await Task.Delay(pollInterval, cancellationToken);
+
+            Process? process;
+            DateTimeOffset? startedAt;
+            bool shouldWatch;
+
+            lock (_gate)
+            {
+                process = _process;
+                startedAt = _startedAt;
+                shouldWatch = _currentSettings?.AutoRestart == true && _manifestPath == manifestPath;
+            }
+
+            if (!shouldWatch || process is null || process.HasExited)
+            {
+                return;
+            }
+
+            var latestOutputAt = GetLatestOutputTimestamp(manifestPath);
+            if (latestOutputAt is not null)
+            {
+                UpdateLastOutputAt(latestOutputAt);
+
+                if (DateTimeOffset.UtcNow - latestOutputAt.Value < staleThreshold)
+                {
+                    continue;
+                }
+
+                QueueRestart(
+                    $"watchdog detected stale HLS output ({Math.Round((DateTimeOffset.UtcNow - latestOutputAt.Value).TotalSeconds)}s without a manifest or segment update)",
+                    TimeSpan.Zero,
+                    stopCurrentProcess: true);
+                return;
+            }
+
+            if (startedAt is null || DateTimeOffset.UtcNow - startedAt.Value < startupGrace)
+            {
+                continue;
+            }
+
+            QueueRestart(
+                $"watchdog detected missing HLS output after {Math.Round((DateTimeOffset.UtcNow - startedAt.Value).TotalSeconds)}s",
+                TimeSpan.Zero,
+                stopCurrentProcess: true);
+            return;
+        }
+    }
+
+    private void QueueRestart(string reason, TimeSpan delay, bool stopCurrentProcess)
+    {
+        TranscoderSettings? settings;
+        string? outputDirectory;
+        CancellationTokenSource restartCts;
+
+        lock (_gate)
+        {
+            if (_manualStop || _currentSettings is null || !_currentSettings.AutoRestart || string.IsNullOrWhiteSpace(_outputDirectory))
+            {
+                return;
+            }
+
+            settings = _currentSettings;
+            outputDirectory = _outputDirectory;
+            _lastRestartReason = reason;
+            _restartCts?.Cancel();
+            _restartCts?.Dispose();
+            _restartCts = new CancellationTokenSource();
+            restartCts = _restartCts;
+        }
+
+        _logger.LogWarning("FFmpeg restart queued: {Reason}", reason);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (delay > TimeSpan.Zero)
+                {
+                    AppendLog($"{reason}; restarting ffmpeg in {Math.Round(delay.TotalSeconds)}s");
+                    await Task.Delay(delay, restartCts.Token);
+                }
+                else
+                {
+                    AppendLog($"{reason}; restarting ffmpeg");
+                }
+
+                if (stopCurrentProcess)
+                {
+                    Stop(cancelScheduledRestart: false);
+                }
+
+                await StartCoreAsync(settings!, outputDirectory!, restartCts.Token, cancelScheduledRestart: false, resetLogs: false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"auto-restart failed: {ex.Message}");
+                _logger.LogError(ex, "FFmpeg auto-restart failed.");
+            }
+            finally
+            {
+                ClearRestartRequest(restartCts);
+            }
+        });
+    }
+
+    private void ClearRestartRequest(CancellationTokenSource restartCts)
+    {
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_restartCts, restartCts))
+            {
+                return;
+            }
+
+            _restartCts?.Dispose();
+            _restartCts = null;
+        }
+    }
+
+    private void UpdateLastOutputAt(DateTimeOffset? lastOutputAt)
+    {
+        if (lastOutputAt is null)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (_lastOutputAt is null || lastOutputAt > _lastOutputAt)
+            {
+                _lastOutputAt = lastOutputAt;
+            }
+        }
+    }
+
+    private static DateTimeOffset? GetLatestOutputTimestamp(string manifestPath)
+    {
+        try
+        {
+            if (!File.Exists(manifestPath))
+            {
+                return null;
+            }
+
+            var latestUtc = File.GetLastWriteTimeUtc(manifestPath);
+            var directory = Path.GetDirectoryName(manifestPath);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                return new DateTimeOffset(latestUtc);
+            }
+
+            foreach (var file in Directory.EnumerateFiles(directory, "*.ts"))
+            {
+                var timestamp = File.GetLastWriteTimeUtc(file);
+                if (timestamp > latestUtc)
+                {
+                    latestUtc = timestamp;
+                }
+            }
+
+            return new DateTimeOffset(latestUtc);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

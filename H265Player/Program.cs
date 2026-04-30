@@ -82,6 +82,7 @@ builder.Services.AddSingleton<AuthenticatorService>();
 builder.Services.AddSingleton<LocalSetupStore>();
 builder.Services.AddSingleton<TranscoderSettingsStore>();
 builder.Services.AddSingleton<FfmpegTranscoderManager>();
+builder.Services.AddSingleton<ServiceRestartCoordinator>();
 builder.Services.AddSingleton<SkyQService>();
 builder.Services.AddSingleton<DirectSkyQPresetStore>();
 builder.Services.AddHostedService<SkyQRefreshService>();
@@ -152,6 +153,7 @@ app.MapStaticAssets();
 app.MapGet("/api/auth/status", GetAuthStatusAsync);
 app.MapPost("/api/auth/login", LoginAsync).RequireRateLimiting("auth-login");
 app.MapPost("/api/auth/logout", (Delegate)LogoutAsync);
+app.MapPost("/api/auth/reset", (Delegate)ResetAuthStateAsync);
 app.MapPost("/api/auth/enroll", EnrollAuthenticatorAsync);
 app.MapGet("/api/auth/accounts", GetAuthAccountsAsync);
 app.MapDelete("/api/auth/accounts", DeleteAuthAccountAsync);
@@ -162,6 +164,8 @@ app.MapMethods("/live/{**filePath}", ["GET", "HEAD"], (HttpContext context, IWeb
     ServeLiveAssetAsync(context, environment, mediaTypes, filePath));
 app.MapGet("/api/setup", (LocalSetupStore store) => Results.Ok(store.Get()));
 app.MapPost("/api/setup", SaveLocalSetupAsync);
+app.MapGet("/api/service/status", GetServiceRestartStatusAsync);
+app.MapPost("/api/service/restart", RestartServiceAsync);
 app.MapGet("/api/settings", (TranscoderSettingsStore store) => Results.Ok(store.Get()));
 app.MapPost("/api/settings", SaveSettingsAsync);
 app.MapGet("/api/transcoder/status", (FfmpegTranscoderManager manager) => Results.Ok(manager.GetStatus()));
@@ -267,6 +271,35 @@ static async Task<IResult> SaveLocalSetupAsync(
     }
 }
 
+static IResult GetServiceRestartStatusAsync(
+    HttpContext httpContext,
+    TrustedNetworkService trustedNetworkService,
+    ServiceRestartCoordinator restartCoordinator)
+{
+    if (!trustedNetworkService.IsTrustedRequest(httpContext))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    return Results.Ok(restartCoordinator.GetStatus());
+}
+
+static IResult RestartServiceAsync(
+    HttpContext httpContext,
+    TrustedNetworkService trustedNetworkService,
+    ServiceRestartCoordinator restartCoordinator)
+{
+    if (!trustedNetworkService.IsTrustedRequest(httpContext))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var status = restartCoordinator.ScheduleRestart();
+    return status.CanSelfRestart
+        ? Results.Ok(status)
+        : Results.Json(status, statusCode: StatusCodes.Status409Conflict);
+}
+
 static IResult GetAuthStatusAsync(
     HttpContext context,
     TrustedNetworkService trustedNetworkService,
@@ -334,6 +367,16 @@ static async Task<IResult> LoginAsync(
 static async Task<IResult> LogoutAsync(HttpContext context)
 {
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.Ok(new { success = true });
+}
+
+static async Task<IResult> ResetAuthStateAsync(HttpContext context)
+{
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    ExpireAppCookies(context);
+    context.Response.Headers["Cache-Control"] = "no-store, no-cache, max-age=0";
+    context.Response.Headers["Pragma"] = "no-cache";
+    context.Response.Headers["Clear-Site-Data"] = "\"cookies\"";
     return Results.Ok(new { success = true });
 }
 
@@ -751,6 +794,23 @@ static string? BuildEmailHint(string email)
 
     return $"{local}@{domain}";
 }
+
+static void ExpireAppCookies(HttpContext context)
+{
+    foreach (var cookieName in context.Request.Cookies.Keys.Where(IsAppCookieName).Distinct(StringComparer.OrdinalIgnoreCase))
+    {
+        context.Response.Cookies.Delete(cookieName, new CookieOptions
+        {
+            Path = "/",
+            SameSite = SameSiteMode.Lax
+        });
+    }
+}
+
+static bool IsAppCookieName(string cookieName) =>
+    cookieName.Equals("H265Player.Auth", StringComparison.OrdinalIgnoreCase) ||
+    cookieName.StartsWith("H265Player.", StringComparison.OrdinalIgnoreCase) ||
+    cookieName.StartsWith(".AspNetCore.Antiforgery.", StringComparison.OrdinalIgnoreCase);
 
 static async Task<bool> IsAllowedHostAsync(string host, CancellationToken cancellationToken)
 {

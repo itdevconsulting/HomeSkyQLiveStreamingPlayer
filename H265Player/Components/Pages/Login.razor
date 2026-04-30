@@ -71,10 +71,25 @@
     private string Code { get; set; } = string.Empty;
     private string ErrorText { get; set; } = string.Empty;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        using var client = CreateClient();
-        Status = await client.GetFromJsonAsync<AuthStatusResponse>("/api/auth/status");
+        if (!firstRender)
+        {
+            return;
+        }
+
+        var response = await JS.InvokeAsync<ApiEnvelope<AuthStatusResponse>>("h265Auth.resetSessionAndGetStatus");
+        if (!response.Ok || response.Json is null)
+        {
+            ErrorText = string.IsNullOrWhiteSpace(response.Text)
+                ? "Unable to load authentication status."
+                : response.Text;
+            Status = new AuthStatusResponse(false, true, false, true, null, null);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        Status = response.Json;
         if (Status?.TrustedNetwork == true)
         {
             await ContinueAsync();
@@ -85,9 +100,9 @@
         {
             Email = Status.Email;
         }
-    }
 
-    private HttpClient CreateClient() => new() { BaseAddress = new Uri(NavigationManager.BaseUri) };
+        await InvokeAsync(StateHasChanged);
+    }
 
     private async Task LoginAsync()
     {
@@ -116,5 +131,13 @@
         public bool Ok { get; set; }
         public int Status { get; set; }
         public string Text { get; set; } = string.Empty;
+    }
+
+    private sealed class ApiEnvelope<T>
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public T? Json { get; set; }
     }
 }

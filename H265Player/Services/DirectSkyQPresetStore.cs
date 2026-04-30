@@ -42,20 +42,11 @@ public sealed class DirectSkyQPresetStore
         DirectSkyQPreset saved;
         lock (_gate)
         {
-            var normalized = preset with
+            var normalized = NormalizePreset(preset with
             {
                 Id = preset.Id == Guid.Empty ? Guid.NewGuid() : preset.Id,
-                Name = preset.Name.Trim(),
-                SourceType = preset.SourceType.Trim().ToLowerInvariant(),
-                StreamUrl = preset.StreamUrl.Trim(),
-                VideoCodec = preset.VideoCodec.Trim(),
-                Preset = preset.Preset.Trim(),
-                AudioMode = preset.AudioMode.Trim(),
-                SkyQHost = preset.SkyQHost.Trim(),
-                SkyQHostName = preset.SkyQHostName.Trim(),
-                SkyQModel = preset.SkyQModel.Trim(),
                 UpdatedAt = DateTimeOffset.UtcNow
-            };
+            });
 
             _presets.RemoveAll(item => item.Id == normalized.Id);
             _presets.Add(normalized);
@@ -95,7 +86,7 @@ public sealed class DirectSkyQPresetStore
         {
             var json = File.ReadAllText(_path);
             var presets = JsonSerializer.Deserialize<List<DirectSkyQPreset>>(json);
-            return presets ?? [];
+            return presets?.Select(NormalizePreset).ToList() ?? [];
         }
         catch
         {
@@ -116,5 +107,39 @@ public sealed class DirectSkyQPresetStore
 
         var json = JsonSerializer.Serialize(snapshot, _jsonOptions);
         await File.WriteAllTextAsync(_path, json, cancellationToken);
+    }
+
+    private static DirectSkyQPreset NormalizePreset(DirectSkyQPreset preset)
+    {
+        var sourceType = preset.SourceType.Trim().ToLowerInvariant();
+        var watchdogCheckIntervalSeconds = NormalizeNullableInt(preset.WatchdogCheckIntervalSeconds, 1, 30);
+        var watchdogStallSeconds = NormalizeNullableInt(preset.WatchdogStallSeconds, 2, 120);
+
+        return preset with
+        {
+            Name = preset.Name.Trim(),
+            SourceType = sourceType,
+            StreamUrl = preset.StreamUrl.Trim(),
+            VideoCodec = preset.VideoCodec.Trim(),
+            Preset = preset.Preset.Trim(),
+            AudioMode = preset.AudioMode.Trim(),
+            WatchdogCheckIntervalSeconds = watchdogCheckIntervalSeconds,
+            WatchdogStallSeconds = watchdogStallSeconds is null || watchdogCheckIntervalSeconds is null
+                ? watchdogStallSeconds
+                : Math.Max(watchdogStallSeconds.Value, watchdogCheckIntervalSeconds.Value + 1),
+            SkyQHost = preset.SkyQHost.Trim(),
+            SkyQHostName = preset.SkyQHostName.Trim(),
+            SkyQModel = preset.SkyQModel.Trim()
+        };
+    }
+
+    private static int? NormalizeNullableInt(int? value, int min, int max)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        return Math.Clamp(value.Value, min, max);
     }
 }

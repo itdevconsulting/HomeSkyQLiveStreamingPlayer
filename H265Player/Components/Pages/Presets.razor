@@ -23,7 +23,7 @@
 
         <label class="field">
             <span>Source type</span>
-            <select @bind="Editor.SourceType">
+            <select value="@Editor.SourceType" @onchange="OnSourceTypeChanged">
                 <option value="direct">Direct</option>
                 <option value="ffmpeg">FFmpeg</option>
                 <option value="rtsp">RTSP</option>
@@ -103,6 +103,28 @@
         </div>
     }
 
+    @if (Editor.SourceType is "direct" or "hls")
+    {
+        <div class="toggle-grid">
+            <label class="check">
+                <input type="checkbox" @bind="Editor.WatchdogEnabled" />
+                <span>Reconnect stalled playback automatically</span>
+            </label>
+        </div>
+
+        <div class="control-grid">
+            <label class="field">
+                <span>Watchdog poll seconds</span>
+                <input type="number" min="1" max="30" @bind="Editor.WatchdogCheckIntervalSeconds" disabled="@(!Editor.WatchdogEnabled)" />
+            </label>
+
+            <label class="field">
+                <span>Restart after stall seconds</span>
+                <input type="number" min="2" max="120" @bind="Editor.WatchdogStallSeconds" disabled="@(!Editor.WatchdogEnabled)" />
+            </label>
+        </div>
+    }
+
     <div class="toolbar">
         <button type="button" @onclick="SaveAsync">Save preset</button>
         <button type="button" @onclick="ResetEditor">New preset</button>
@@ -164,7 +186,8 @@
         "Use Save As Preset from Direct, FFmpeg, RTSP, or HLS to open this page with the current source already filled in.",
         "Choose the Sky Q box that should be associated with that saved stream.",
         "FFmpeg and RTSP presets also store the codec, preset, audio, and autoplay/restart options needed to recreate the stream path.",
-        "HLS presets store whether the HLS proxy rewrite should be used.",
+        "Direct and HLS presets can auto-reopen the browser player when playback stalls, with per-preset poll and timeout values.",
+        "HLS presets also store whether the HLS proxy rewrite should be used.",
         "Saved presets are written to disk and also appear in the left navigation under the Presets section."
     ];
 
@@ -191,6 +214,15 @@
 
     [SupplyParameterFromQuery(Name = "useHlsProxy")]
     private bool? UseHlsProxyQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "watchdogEnabled")]
+    private bool? WatchdogEnabledQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "watchdogCheckIntervalSeconds")]
+    private int? WatchdogCheckIntervalSecondsQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "watchdogStallSeconds")]
+    private int? WatchdogStallSecondsQuery { get; set; }
 
     private List<DirectSkyQPreset> SavedPresets { get; set; } = [];
     private List<SkyQDevice> Devices { get; set; } = [];
@@ -221,7 +253,10 @@
             AudioModeQuery ?? string.Empty,
             AutoRestartQuery?.ToString() ?? string.Empty,
             AutoPlayQuery?.ToString() ?? string.Empty,
-            UseHlsProxyQuery?.ToString() ?? string.Empty);
+            UseHlsProxyQuery?.ToString() ?? string.Empty,
+            WatchdogEnabledQuery?.ToString() ?? string.Empty,
+            WatchdogCheckIntervalSecondsQuery?.ToString() ?? string.Empty,
+            WatchdogStallSecondsQuery?.ToString() ?? string.Empty);
 
         if (prefillKey == _lastPrefillKey || string.IsNullOrWhiteSpace(StreamUrlQuery))
         {
@@ -229,17 +264,21 @@
         }
 
         _lastPrefillKey = prefillKey;
+        var sourceType = NormalizeSourceType(SourceTypeQuery);
         Editor = new EditorModel
         {
             Name = BuildDefaultName(StreamUrlQuery!, SourceTypeQuery),
-            SourceType = NormalizeSourceType(SourceTypeQuery),
+            SourceType = sourceType,
             StreamUrl = StreamUrlQuery ?? string.Empty,
             VideoCodec = string.IsNullOrWhiteSpace(VideoCodecQuery) ? "libx264" : VideoCodecQuery,
             Preset = string.IsNullOrWhiteSpace(PresetQuery) ? "browser-safe-h264" : PresetQuery,
             AudioMode = string.IsNullOrWhiteSpace(AudioModeQuery) ? "none" : AudioModeQuery,
             AutoRestart = AutoRestartQuery ?? true,
             AutoPlay = AutoPlayQuery ?? true,
-            UseHlsProxy = UseHlsProxyQuery ?? true
+            UseHlsProxy = UseHlsProxyQuery ?? true,
+            WatchdogEnabled = WatchdogEnabledQuery ?? GetDefaultWatchdogEnabled(sourceType),
+            WatchdogCheckIntervalSeconds = WatchdogCheckIntervalSecondsQuery ?? GetDefaultWatchdogCheckIntervalSeconds(sourceType),
+            WatchdogStallSeconds = WatchdogStallSecondsQuery ?? GetDefaultWatchdogStallSeconds(sourceType)
         };
         Status = "Preset editor prefilled from source page";
     }
@@ -292,6 +331,9 @@
             Editor.AutoRestart,
             Editor.AutoPlay,
             Editor.UseHlsProxy,
+            GetSavedWatchdogEnabled(),
+            GetSavedWatchdogCheckIntervalSeconds(),
+            GetSavedWatchdogStallSeconds(),
             Editor.SkyQHost,
             Editor.SkyQHostName,
             Editor.SkyQModel,
@@ -322,6 +364,9 @@
             AutoRestart = preset.AutoRestart,
             AutoPlay = preset.AutoPlay,
             UseHlsProxy = preset.UseHlsProxy,
+            WatchdogEnabled = preset.WatchdogEnabled ?? GetDefaultWatchdogEnabled(preset.SourceType),
+            WatchdogCheckIntervalSeconds = preset.WatchdogCheckIntervalSeconds ?? GetDefaultWatchdogCheckIntervalSeconds(preset.SourceType),
+            WatchdogStallSeconds = preset.WatchdogStallSeconds ?? GetDefaultWatchdogStallSeconds(preset.SourceType),
             SkyQHost = preset.SkyQHost,
             SkyQHostName = preset.SkyQHostName,
             SkyQModel = preset.SkyQModel
@@ -356,6 +401,21 @@
         return Task.CompletedTask;
     }
 
+    private Task OnSourceTypeChanged(ChangeEventArgs args)
+    {
+        var sourceType = NormalizeSourceType(args.Value?.ToString());
+        Editor.SourceType = sourceType;
+
+        if (SupportsPlayerWatchdog(sourceType))
+        {
+            Editor.WatchdogEnabled = GetDefaultWatchdogEnabled(sourceType);
+            Editor.WatchdogCheckIntervalSeconds = GetDefaultWatchdogCheckIntervalSeconds(sourceType);
+            Editor.WatchdogStallSeconds = GetDefaultWatchdogStallSeconds(sourceType);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private static string NormalizeSourceType(string? value)
     {
         var normalized = value?.Trim().ToLowerInvariant();
@@ -382,6 +442,37 @@
         return $"{NormalizeSourceType(sourceType).ToUpperInvariant()} preset";
     }
 
+    private bool? GetSavedWatchdogEnabled() =>
+        SupportsPlayerWatchdog(Editor.SourceType) ? Editor.WatchdogEnabled : null;
+
+    private int? GetSavedWatchdogCheckIntervalSeconds() =>
+        SupportsPlayerWatchdog(Editor.SourceType) && Editor.WatchdogEnabled
+            ? NormalizeWatchdogCheckIntervalSeconds(Editor.WatchdogCheckIntervalSeconds)
+            : null;
+
+    private int? GetSavedWatchdogStallSeconds() =>
+        SupportsPlayerWatchdog(Editor.SourceType) && Editor.WatchdogEnabled
+            ? NormalizeWatchdogStallSeconds(Editor.WatchdogCheckIntervalSeconds, Editor.WatchdogStallSeconds)
+            : null;
+
+    private static bool SupportsPlayerWatchdog(string? sourceType) =>
+        NormalizeSourceType(sourceType) is "direct" or "hls";
+
+    private static bool GetDefaultWatchdogEnabled(string? sourceType) =>
+        SupportsPlayerWatchdog(sourceType);
+
+    private static int GetDefaultWatchdogCheckIntervalSeconds(string? sourceType) =>
+        NormalizeSourceType(sourceType) == "hls" ? 5 : 3;
+
+    private static int GetDefaultWatchdogStallSeconds(string? sourceType) =>
+        NormalizeSourceType(sourceType) == "hls" ? 15 : 10;
+
+    private static int NormalizeWatchdogCheckIntervalSeconds(int value) =>
+        Math.Clamp(value, 1, 30);
+
+    private static int NormalizeWatchdogStallSeconds(int checkIntervalSeconds, int stallSeconds) =>
+        Math.Max(Math.Clamp(stallSeconds, 2, 120), NormalizeWatchdogCheckIntervalSeconds(checkIntervalSeconds) + 1);
+
     private sealed class EditorModel
     {
         public Guid Id { get; set; }
@@ -394,6 +485,9 @@
         public bool AutoRestart { get; set; } = true;
         public bool AutoPlay { get; set; } = true;
         public bool UseHlsProxy { get; set; } = true;
+        public bool WatchdogEnabled { get; set; } = true;
+        public int WatchdogCheckIntervalSeconds { get; set; } = 3;
+        public int WatchdogStallSeconds { get; set; } = 10;
         public string SkyQHost { get; set; } = string.Empty;
         public string SkyQHostName { get; set; } = string.Empty;
         public string SkyQModel { get; set; } = string.Empty;

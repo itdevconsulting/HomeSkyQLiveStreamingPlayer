@@ -186,7 +186,7 @@ else
             case "hls":
                 _managedHostStyle = "display:none";
                 _videoHostStyle = "";
-                var hlsResult = await JS.InvokeAsync<HlsLoadResult>("h265App.hlsLoadToElement", "preset-player-host", _preset.StreamUrl, _preset.UseHlsProxy, _bufferingLevel);
+                var hlsResult = await JS.InvokeAsync<HlsLoadResult>("h265App.hlsLoadToElement", "preset-player-host", _preset.StreamUrl, _preset.UseHlsProxy, _bufferingLevel, BuildPlaybackWatchdogOptions());
                 _status = hlsResult.Status;
                 _logText = $"Starting {hlsResult.ResolvedUrl}";
                 _hasLoadedPlayer = true;
@@ -203,7 +203,7 @@ else
             default:
                 _managedHostStyle = "display:none";
                 _videoHostStyle = "";
-                var directResult = await JS.InvokeAsync<DirectLoadResult>("h265App.directLoadToElement", "preset-player-host", _preset.StreamUrl, _dotNetRef, _bufferingLevel);
+                var directResult = await JS.InvokeAsync<DirectLoadResult>("h265App.directLoadToElement", "preset-player-host", _preset.StreamUrl, _dotNetRef, _bufferingLevel, BuildPlaybackWatchdogOptions());
                 _status = directResult.Status;
                 _logText = $"Starting {directResult.ProxyUrl}";
                 _hasLoadedPlayer = true;
@@ -347,6 +347,42 @@ else
         return true;
     }
 
+    private PlaybackWatchdogOptions? BuildPlaybackWatchdogOptions()
+    {
+        if (_preset is null || !SupportsPlaybackWatchdog(_preset.SourceType))
+        {
+            return null;
+        }
+
+        var checkIntervalSeconds = NormalizeWatchdogCheckIntervalSeconds(
+            _preset.WatchdogCheckIntervalSeconds ?? GetDefaultWatchdogCheckIntervalSeconds(_preset.SourceType));
+
+        return new PlaybackWatchdogOptions
+        {
+            Enabled = _preset.WatchdogEnabled ?? true,
+            CheckIntervalSeconds = checkIntervalSeconds,
+            StallSeconds = NormalizeWatchdogStallSeconds(
+                checkIntervalSeconds,
+                _preset.WatchdogStallSeconds ?? GetDefaultWatchdogStallSeconds(_preset.SourceType))
+        };
+    }
+
+    private static bool SupportsPlaybackWatchdog(string? sourceType) =>
+        string.Equals(sourceType, "direct", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sourceType, "hls", StringComparison.OrdinalIgnoreCase);
+
+    private static int GetDefaultWatchdogCheckIntervalSeconds(string? sourceType) =>
+        string.Equals(sourceType, "hls", StringComparison.OrdinalIgnoreCase) ? 5 : 3;
+
+    private static int GetDefaultWatchdogStallSeconds(string? sourceType) =>
+        string.Equals(sourceType, "hls", StringComparison.OrdinalIgnoreCase) ? 15 : 10;
+
+    private static int NormalizeWatchdogCheckIntervalSeconds(int value) =>
+        Math.Clamp(value, 1, 30);
+
+    private static int NormalizeWatchdogStallSeconds(int checkIntervalSeconds, int stallSeconds) =>
+        Math.Max(Math.Clamp(stallSeconds, 2, 120), NormalizeWatchdogCheckIntervalSeconds(checkIntervalSeconds) + 1);
+
     [JSInvokable]
     public Task OnDirectStatusChanged(string status)
     {
@@ -379,6 +415,13 @@ else
         public string ResolvedUrl { get; set; } = string.Empty;
         public string Framework { get; set; } = "Idle";
         public string Status { get; set; } = "Idle";
+    }
+
+    private sealed class PlaybackWatchdogOptions
+    {
+        public bool Enabled { get; set; }
+        public int CheckIntervalSeconds { get; set; }
+        public int StallSeconds { get; set; }
     }
 
     private sealed class StartRequest

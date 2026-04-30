@@ -7,7 +7,10 @@ public sealed record TranscoderStatusResponse(
     DateTimeOffset? StartedAt,
     string ManifestUrl,
     TranscoderSettings? Settings,
-    IReadOnlyList<string> Logs);
+    IReadOnlyList<string> Logs,
+    bool WatchdogEnabled,
+    DateTimeOffset? LastOutputAt,
+    string? LastRestartReason);
 
 public sealed record TranscoderSettings(
     string FfmpegPath,
@@ -29,4 +32,12 @@ public sealed class TranscoderDefaults
     public bool AutoRestart { get; init; } = true;
     public bool AutoPlay { get; init; } = true;
     public bool AutoStart { get; init; }
+}
+
+public sealed class TranscoderWatchdogOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int PollIntervalSeconds { get; init; } = 3;
+    public int StartupGraceSeconds { get; init; } = 10;
+    public int StaleOutputSeconds { get; init; } = 12;
 }
