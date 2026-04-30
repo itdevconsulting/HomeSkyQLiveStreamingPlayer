@@ -4,11 +4,27 @@ Blazor Server application for securely viewing and controlling a live home Sky Q
 
 ## Recommended Linux Install
 
+For transparency, the short URL and the direct raw GitHub URL are both shown below. The short URL currently redirects to the same installer script.
+
+Short URL:
+
+```bash
+curl -fsSL https://bit.ly/4naEQhR | sudo bash
+```
+
+Direct raw GitHub URL:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
 ```
 
-Fallback:
+Short URL fallback:
+
+```bash
+wget -qO- https://bit.ly/4naEQhR | sudo bash
+```
+
+Direct raw GitHub fallback:
 
 ```bash
 wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash

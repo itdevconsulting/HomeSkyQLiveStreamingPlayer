@@ -1,12 +1,26 @@
 # Linux Install
 
-Quick install from the public GitHub repo:
+For transparency, the short URL and the direct raw GitHub URL are both shown below. The short URL currently redirects to the same installer script.
+
+Quick install using the short URL:
+
+```bash
+curl -fsSL https://bit.ly/4naEQhR | sudo bash
+```
+
+Quick install using the direct raw GitHub URL:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
 ```
 
-Alternative one-liners:
+Alternative one-liners using the short URL:
+
+```bash
+wget -qO- https://bit.ly/4naEQhR | sudo bash
+```
+
+Alternative one-liners using the direct raw GitHub URL:
 
 ```bash
 wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash
