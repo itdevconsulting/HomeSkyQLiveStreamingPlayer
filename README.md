@@ -2,7 +2,39 @@
 
 Blazor Server application for securely viewing and controlling a live home Sky Q box over the internet with low latency.
 
-## Recommended Linux Install
+This project is designed for self-hosted home setups where a Sky Q box is connected to a local IP encoder. It lets you watch your own Sky TV remotely in a browser, using your own hardware and network rather than relying on services like Sky Go.
+
+![Home Sky Q Live Streaming Player screenshot](H265Player/sample.png)
+
+## 🚀 Key Features
+
+- 🌍 Remote browser playback for your own home Sky Q setup
+- 📺 Support for HLS (`.m3u8`) and direct MPEG-TS browser playback
+- 🎥 Managed FFmpeg ingest/transcode for awkward HTTP or RTSP sources
+- 🧩 Compatibility with H.264 and H.265/HEVC encoder outputs
+- ⚡ Low-latency playback paths depending on encoder and browser support
+- 🎛️ Built-in Sky Q discovery and remote control
+- 🔒 Authenticator-based external access with trusted local setup
+- 🐧 Self-hosted deployment with Linux install scripts for updates and re-runs
+
+## 🧠 How It Works
+
+1. A Sky Q box is connected to a local HDMI encoder.
+2. The encoder exposes a stream such as HLS, MPEG-TS, or RTSP.
+3. This app either plays that stream directly in the browser or normalizes it through FFmpeg first.
+4. You access the app remotely through your own private deployment, typically with Tailscale or Cloudflare Zero Trust in front of it.
+
+## ⚠️ Personal Use
+
+This project is intended for personal use only, so you can access content you already subscribe to using your own hardware.
+
+It does not:
+
+- provide access to Sky content by itself
+- bypass subscription requirements
+- include pirated streams or third-party content feeds
+
+## 🐧 Recommended Linux Install
 
 For transparency, the short URL and the direct raw GitHub URL are both shown below. The short URL currently redirects to the same installer script.
 
@@ -32,7 +64,7 @@ wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamin
 
 Detailed Linux deployment notes are in [LINUX-INSTALL.md](LINUX-INSTALL.md).
 
-## What It Does
+## 📦 What It Does
 
 - discovers Sky Q boxes on the local private network
 - sends Sky Q remote-control commands over the LAN control socket
@@ -40,13 +72,13 @@ Detailed Linux deployment notes are in [LINUX-INSTALL.md](LINUX-INSTALL.md).
 - supports FFmpeg-managed ingest/transcode for awkward HTTP or RTSP sources
 - stores presets that bind a stream source to a specific Sky Q box
 
-## Security Model
+## 🔐 Security Model
 
 - trusted setup is limited to localhost, RFC1918 private networks, and Tailscale
 - external users authenticate with enrolled TOTP authenticator codes
 - the recommended deployment model is to keep the app private and place Tailscale or Cloudflare Zero Trust in front of it
 
-## Linux Installer Summary
+## 🛠️ Linux Installer Summary
 
 The bootstrap installer:
 
@@ -74,8 +106,9 @@ From there:
 4. Generate and scan the authenticator QR code.
 5. External users then sign in at `/auth/login`.
 
-## Notes
+## 📝 Notes
 
 - FFmpeg is not bundled. Install it locally and save the detected path on the `Setup` page.
 - Browser HEVC/H.265 support still varies by browser and platform. `H.264` remains the safer compatibility option.
 - Machine-local runtime files such as auth settings, presets, cache data, and transcoder state are intentionally not published in the public repo.
+- You are responsible for complying with local law and any applicable Sky terms for your own use of the system.
