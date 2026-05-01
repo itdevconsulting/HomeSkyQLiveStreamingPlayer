@@ -76,8 +76,11 @@
                         case "play":
                             <span class="mini-icon mini-icon-play" aria-hidden="true"></span>
                             break;
-                        case "pause":
-                            <span class="mini-icon mini-icon-pause" aria-hidden="true"></span>
+                        case "playpause":
+                            <span class="mini-icon mini-icon-playpause" aria-hidden="true"></span>
+                            break;
+                        case "record":
+                            <span class="mini-icon mini-icon-record" aria-hidden="true"></span>
                             break;
                         case "fastforward":
                             <span class="mini-icon mini-icon-fastforward" aria-hidden="true"></span>
@@ -188,8 +191,8 @@
     private static readonly IReadOnlyList<RemoteCommand> PlaybackCommands =
     [
         new("Rewind", "rewind", "rewind"),
-        new("Play", "play", "play"),
-        new("Pause", "pause", "pause"),
+        new("Play/Pause", "play", "playpause"),
+        new("Record", "record", "record"),
         new("Fast Forward", "fastforward", "fastforward")
     ];
 

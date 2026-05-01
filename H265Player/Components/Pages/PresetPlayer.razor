@@ -139,7 +139,7 @@ else
             ? "Sky Q"
             : string.IsNullOrWhiteSpace(_preset.SkyQHostName)
                 ? _preset.SkyQHost
-                : $"{_preset.SkyQHostName} ({_preset.SkyQHost})";
+                : _preset.SkyQHostName;
 
     private string ManagedHostStyle => _managedHostStyle;
     private string VideoHostStyle => _videoHostStyle;
