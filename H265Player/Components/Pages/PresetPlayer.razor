@@ -48,23 +48,20 @@ else
                 </div>
             </div>
 
-            <div class="@GetBufferingControlClass()" title="@BufferingTitle" role="group" aria-label="Buffering level">
+            <label class="@GetBufferingControlClass()" title="@BufferingTitle">
                 <span class="preset-buffer-label">Buf</span>
-                <div class="preset-buffer-steps">
-                    @for (var level = 1; level <= 5; level++)
-                    {
-                        var currentLevel = level;
-                        <button type="button"
-                                class="@GetBufferButtonClass(currentLevel)"
-                                disabled="@(!SupportsAdjustableBuffering)"
-                                @onclick="() => SetBufferingLevelAsync(currentLevel)"
-                                title="@GetBufferLevelTitle(currentLevel)">
-                            @currentLevel
-                        </button>
-                    }
-                </div>
-                <span class="preset-buffer-value">@BufferingLabel</span>
-            </div>
+                <input type="range"
+                       class="preset-buffer-slider"
+                       min="1"
+                       max="5"
+                       step="1"
+                       value="@_bufferingLevel"
+                       style="@GetBufferingSliderStyle()"
+                       disabled="@(!SupportsAdjustableBuffering)"
+                       @oninput="OnBufferingInput"
+                       @onchange="OnBufferingCommittedAsync" />
+                <span class="preset-buffer-value">@_bufferingLevel</span>
+            </label>
 
             <div class="preset-header-main">
                 <h2 class="preset-title">@_preset.Name</h2>
@@ -128,6 +125,7 @@ else
     private string _lastCommand = "None";
     private string _videoSize = "medium";
     private int _bufferingLevel = 5;
+    private bool _bufferingDirty;
     private bool _hasLoadedPlayer;
     private string _managedHostStyle = "display:none";
     private string _videoHostStyle = "";
@@ -304,34 +302,29 @@ else
     private string GetBufferingControlClass() =>
         SupportsAdjustableBuffering ? "preset-buffer-control" : "preset-buffer-control preset-buffer-control-disabled";
 
-    private string GetBufferButtonClass(int level) =>
-        _bufferingLevel == level
-            ? "preset-buffer-step active"
-            : "preset-buffer-step";
+    private string GetBufferingSliderStyle() => $"--buffer-fill:{(_bufferingLevel - 1) * 25}%;";
 
-    private string GetBufferLevelTitle(int level)
+    private void OnBufferingInput(ChangeEventArgs args)
     {
-        var label = level switch
+        if (TryUpdateBufferingLevel(args))
         {
-            1 => "Min",
-            2 => "Low",
-            3 => "Med",
-            4 => "High",
-            _ => "Max"
-        };
-
-        return $"Buffering {label} ({level}/5)";
+            _bufferingDirty = true;
+        }
     }
 
-    private async Task SetBufferingLevelAsync(int level)
+    private async Task OnBufferingCommittedAsync(ChangeEventArgs args)
     {
-        var normalized = Math.Clamp(level, 1, 5);
-        if (normalized == _bufferingLevel)
+        if (TryUpdateBufferingLevel(args))
+        {
+            _bufferingDirty = true;
+        }
+
+        if (!_bufferingDirty)
         {
             return;
         }
 
-        _bufferingLevel = normalized;
+        _bufferingDirty = false;
 
         if (!_hasLoadedPlayer || !SupportsAdjustableBuffering)
         {
@@ -339,6 +332,23 @@ else
         }
 
         await GoAsync();
+    }
+
+    private bool TryUpdateBufferingLevel(ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out var parsed))
+        {
+            return false;
+        }
+
+        var normalized = Math.Clamp(parsed, 1, 5);
+        if (normalized == _bufferingLevel)
+        {
+            return false;
+        }
+
+        _bufferingLevel = normalized;
+        return true;
     }
 
     private PlaybackWatchdogOptions? BuildPlaybackWatchdogOptions()

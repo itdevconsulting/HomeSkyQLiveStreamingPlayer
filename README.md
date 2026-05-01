@@ -110,5 +110,6 @@ From there:
 
 - FFmpeg is not bundled. Install it locally and save the detected path on the `Setup` page.
 - Browser HEVC/H.265 support still varies by browser and platform. `H.264` remains the safer compatibility option.
+- Some aggressive form-filler, password-manager, or in-page autofill browser extensions can inject DOM changes that interfere with Blazor Server and break the active circuit. If users see intermittent circuit disconnects or browser-side DOM errors, retest with in-page autofill disabled for this site first.
 - Machine-local runtime files such as auth settings, presets, cache data, and transcoder state are intentionally not published in the public repo.
 - You are responsible for complying with local law and any applicable Sky terms for your own use of the system.
