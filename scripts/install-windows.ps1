@@ -281,6 +281,7 @@ function Create-Service {
     }
 
     $binaryPath = "`"$appExe`" --urls `"http://0.0.0.0:$Port`""
+    $serviceAccount = "LocalService"
 
     Write-Log "Creating Windows service $ServiceDisplayName"
     Invoke-Sc -Arguments @(
@@ -288,8 +289,7 @@ function Create-Service {
         "binPath=", $binaryPath,
         "start=", "auto",
         "DisplayName=", $ServiceDisplayName,
-        "obj=", "NT AUTHORITY\LocalService",
-        "password=", ""
+        "obj=", $serviceAccount
     )
 
     Invoke-Sc -Arguments @("description", $ServiceName, "Home Sky Q Live Streaming Player")
