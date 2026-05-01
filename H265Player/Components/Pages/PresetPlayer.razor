@@ -25,7 +25,7 @@ else
                     <button type="button" class="preset-icon-button preset-icon-button-play" @onclick="GoAsync" title="Play">
                         <span class="play-icon" aria-hidden="true"></span>
                     </button>
-                    <SkyQMiniRemote Title="@RemoteTitle" ButtonCssClass="preset-icon-button preset-icon-button-remote" OnCommand="SendCommandAsync">
+                    <SkyQMiniRemote Title="@RemoteTitle" ButtonCssClass="preset-icon-button preset-icon-button-remote" PositionKey="preset-player" OnCommand="SendCommandAsync">
                         <ButtonContent>
                             <span class="remote-icon" aria-hidden="true">
                                 <span class="remote-icon-screen"></span>
@@ -48,20 +48,23 @@ else
                 </div>
             </div>
 
-            <label class="@GetBufferingControlClass()" title="@BufferingTitle">
+            <div class="@GetBufferingControlClass()" title="@BufferingTitle" role="group" aria-label="Buffering level">
                 <span class="preset-buffer-label">Buf</span>
-                <input type="range"
-                       class="preset-buffer-slider"
-                       min="1"
-                       max="5"
-                       step="1"
-                       value="@_bufferingLevel"
-                       style="@GetBufferingSliderStyle()"
-                       disabled="@(!SupportsAdjustableBuffering)"
-                       @oninput="OnBufferingInput"
-                       @onchange="OnBufferingCommittedAsync" />
-                <span class="preset-buffer-value">@_bufferingLevel</span>
-            </label>
+                <div class="preset-buffer-steps">
+                    @for (var level = 1; level <= 5; level++)
+                    {
+                        var currentLevel = level;
+                        <button type="button"
+                                class="@GetBufferButtonClass(currentLevel)"
+                                disabled="@(!SupportsAdjustableBuffering)"
+                                @onclick="() => SetBufferingLevelAsync(currentLevel)"
+                                title="@GetBufferLevelTitle(currentLevel)">
+                            @currentLevel
+                        </button>
+                    }
+                </div>
+                <span class="preset-buffer-value">@BufferingLabel</span>
+            </div>
 
             <div class="preset-header-main">
                 <h2 class="preset-title">@_preset.Name</h2>
@@ -87,8 +90,12 @@ else
     {
     <section class="player-panel preset-player-panel">
         <div class="preset-video-shell @($"preset-video-{_videoSize}")">
-            <div id="preset-managed-host" class="player-host" style="@ManagedHostStyle"></div>
-            <video id="preset-player-host" class="video-host" style="@VideoHostStyle" controls playsinline></video>
+            <div style="@ManagedHostStyle">
+                <StaticDomHost Id="preset-managed-host" CssClass="player-host" />
+            </div>
+            <div style="@VideoHostStyle">
+                <StaticDomHost Id="preset-player-host" Kind="video" CssClass="video-host" Controls="true" PlaysInline="true" />
+            </div>
         </div>
         <div class="preset-meta">
             <span><strong>@_preset.SourceType.ToUpperInvariant()</strong></span>
@@ -121,7 +128,6 @@ else
     private string _lastCommand = "None";
     private string _videoSize = "medium";
     private int _bufferingLevel = 5;
-    private bool _bufferingDirty;
     private bool _hasLoadedPlayer;
     private string _managedHostStyle = "display:none";
     private string _videoHostStyle = "";
@@ -298,29 +304,34 @@ else
     private string GetBufferingControlClass() =>
         SupportsAdjustableBuffering ? "preset-buffer-control" : "preset-buffer-control preset-buffer-control-disabled";
 
-    private string GetBufferingSliderStyle() => $"--buffer-fill:{(_bufferingLevel - 1) * 25}%;";
+    private string GetBufferButtonClass(int level) =>
+        _bufferingLevel == level
+            ? "preset-buffer-step active"
+            : "preset-buffer-step";
 
-    private void OnBufferingInput(ChangeEventArgs args)
+    private string GetBufferLevelTitle(int level)
     {
-        if (TryUpdateBufferingLevel(args))
+        var label = level switch
         {
-            _bufferingDirty = true;
-        }
+            1 => "Min",
+            2 => "Low",
+            3 => "Med",
+            4 => "High",
+            _ => "Max"
+        };
+
+        return $"Buffering {label} ({level}/5)";
     }
 
-    private async Task OnBufferingCommittedAsync(ChangeEventArgs args)
+    private async Task SetBufferingLevelAsync(int level)
     {
-        if (TryUpdateBufferingLevel(args))
-        {
-            _bufferingDirty = true;
-        }
-
-        if (!_bufferingDirty)
+        var normalized = Math.Clamp(level, 1, 5);
+        if (normalized == _bufferingLevel)
         {
             return;
         }
 
-        _bufferingDirty = false;
+        _bufferingLevel = normalized;
 
         if (!_hasLoadedPlayer || !SupportsAdjustableBuffering)
         {
@@ -328,23 +339,6 @@ else
         }
 
         await GoAsync();
-    }
-
-    private bool TryUpdateBufferingLevel(ChangeEventArgs args)
-    {
-        if (!int.TryParse(args.Value?.ToString(), out var parsed))
-        {
-            return false;
-        }
-
-        var normalized = Math.Clamp(parsed, 1, 5);
-        if (normalized == _bufferingLevel)
-        {
-            return false;
-        }
-
-        _bufferingLevel = normalized;
-        return true;
     }
 
     private PlaybackWatchdogOptions? BuildPlaybackWatchdogOptions()

@@ -144,6 +144,9 @@
     [Parameter]
     public EventCallback<string> OnCommand { get; set; }
 
+    [Parameter]
+    public string PositionKey { get; set; } = "default";
+
     private static readonly IReadOnlyList<RemoteCommand> TopCommands =
     [
         new("Power", "power", "power"),
@@ -202,7 +205,7 @@
     {
         if (_isOpen)
         {
-            await JS.InvokeVoidAsync("h265App.enableMiniRemote", PanelId, HandleId);
+            await JS.InvokeVoidAsync("h265App.enableMiniRemote", PanelId, HandleId, PositionKey);
         }
     }
 

@@ -1,39 +1,434 @@
 <div class="info-button-shell">
-    <button type="button" class="info-button" @onclick="Open">Info</button>
+    <button type="button" class="info-button" @onclick="Open" aria-haspopup="dialog" aria-expanded="@_isOpen">
+        <span class="info-button-icon" aria-hidden="true"></span>
+        <span>Info</span>
+    </button>
 </div>
 
 @if (_isOpen)
 {
     <div class="info-modal-backdrop" @onclick="Close">
-        <div class="info-modal" @onclick:stopPropagation="true">
-            <div class="info-modal-header">
-                <div>
-                    <p class="eyebrow">Page Help</p>
-                    <h2>@Title</h2>
+        <div class="info-modal" @onclick:stopPropagation="true" role="dialog" aria-modal="true" aria-labelledby="page-info-title">
+            <div class="info-modal-top">
+                <div class="info-modal-header">
+                    <div>
+                        <p class="eyebrow">Help Center</p>
+                        <h2 class="info-modal-title" id="page-info-title">@Title</h2>
+                        @if (!string.IsNullOrWhiteSpace(Summary))
+                        {
+                            <p class="info-modal-lede">@Summary</p>
+                        }
+                    </div>
+                    <button type="button" class="info-modal-close" @onclick="Close" aria-label="Close help">
+                        <span class="info-modal-close-icon" aria-hidden="true"></span>
+                    </button>
                 </div>
-                <button type="button" class="info-modal-close" @onclick="Close">Close</button>
+
+                <div class="info-summary-strip">
+                    @foreach (var pill in SummaryPills)
+                    {
+                        <span class="info-summary-pill">@pill</span>
+                    }
+                </div>
+
+                <div class="nav nav-tabs info-tabs" role="tablist" aria-label="Help tabs">
+                    @foreach (var tab in Tabs)
+                    {
+                        <button type="button"
+                                class="@GetTabButtonClass(tab.Id)"
+                                @onclick="() => SelectTab(tab.Id)"
+                                role="tab"
+                                aria-selected="@(_activeTab == tab.Id)">
+                            @tab.Label
+                        </button>
+                    }
+                </div>
             </div>
 
-            @if (!string.IsNullOrWhiteSpace(Summary))
-            {
-                <p class="lede">@Summary</p>
-            }
+            <div class="tab-content info-modal-body">
+                @if (_activeTab == AboutTabId)
+                {
+                    <div class="@GetTabPaneClass(AboutTabId)" role="tabpanel">
+                    <div class="info-layout">
+                        <section class="info-section">
+                            <h3>What this project is</h3>
+                            <div class="info-section-copy">
+                                <p>Home Sky Q Live Streaming Player is a Blazor Server application for securely viewing and controlling a live home Sky Q box over the internet with low latency.</p>
+                                <p>It is designed for a self-hosted home setup where your own Sky Q box is connected to a local HDMI encoder, and you want browser access to that stream without relying on third-party consumer streaming services.</p>
+                            </div>
+                        </section>
 
-            @if (Items is { Count: > 0 })
-            {
-                <ul class="info-list">
-                    @foreach (var item in Items)
-                    {
-                        <li>@item</li>
-                    }
-                </ul>
-            }
+                        <section class="info-section">
+                            <h3>Key features</h3>
+                            <div class="info-section-grid">
+                                <div class="info-mini-block">
+                                    <strong>Playback</strong>
+                                    <ul class="info-list">
+                                        @foreach (var item in AboutPlaybackItems)
+                                        {
+                                            <li>@item</li>
+                                        }
+                                    </ul>
+                                </div>
+                                <div class="info-mini-block">
+                                    <strong>Control and access</strong>
+                                    <ul class="info-list">
+                                        @foreach (var item in AboutControlItems)
+                                        {
+                                            <li>@item</li>
+                                        }
+                                    </ul>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>How it works</h3>
+                            <ol class="info-numbered">
+                                @foreach (var step in AboutHowItWorks)
+                                {
+                                    <li>@step</li>
+                                }
+                            </ol>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>Linux install path</h3>
+                            <div class="info-section-copy">
+                                <p>The README documents a Linux bootstrap flow that installs FFmpeg and the .NET runtime if needed, publishes the app, updates the `SkyStreamingService` systemd service, and preserves local runtime state across upgrades.</p>
+                            </div>
+                            <code class="info-code">curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | sudo bash</code>
+                            <div class="info-note">
+                                Detailed deployment notes live in <code>LINUX-INSTALL.md</code>. After install, the normal first step is opening <code>http://127.0.0.1:5221/setup</code> and completing FFmpeg plus authenticator setup.
+                            </div>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>License and upstream references</h3>
+                            <ul class="info-list">
+                                @foreach (var item in LicenseItems)
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>Usage and anti-piracy disclaimer</h3>
+                            <div class="info-note info-note-warning">
+                                This project is intended for personal use only with content you already subscribe to, using your own hardware and your own network. It does not provide Sky content, bypass subscription checks, or legitimize piracy, public restreaming, account sharing, or third-party pirated feeds.
+                            </div>
+                            <ul class="info-list">
+                                @foreach (var item in UsageDisclaimerItems)
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+                    </div>
+                    </div>
+                }
+                else if (_activeTab == ThisPageTabId)
+                {
+                    <div class="@GetTabPaneClass(ThisPageTabId)" role="tabpanel">
+                    <div class="info-layout">
+                        <section class="info-section">
+                            <h3>What this page is for</h3>
+                            <div class="info-note info-note-strong">@Summary</div>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>Recommended workflow</h3>
+                            <ol class="info-numbered">
+                                @foreach (var step in GetPageWorkflowItems())
+                                {
+                                    <li>@step</li>
+                                }
+                            </ol>
+                        </section>
+
+                        @if (Items is { Count: > 0 })
+                        {
+                            <section class="info-section">
+                                <h3>Important page notes</h3>
+                                <ul class="info-list">
+                                    @foreach (var item in Items)
+                                    {
+                                        <li>@item</li>
+                                    }
+                                </ul>
+                            </section>
+                        }
+
+                        <section class="info-section">
+                            <h3>When to switch to another page</h3>
+                            <ul class="info-list">
+                                @foreach (var item in GetPageSwitchItems())
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+                    </div>
+                    </div>
+                }
+                else if (_activeTab == QuickStartTabId)
+                {
+                    <div class="@GetTabPaneClass(QuickStartTabId)" role="tabpanel">
+                    <div class="info-layout">
+                        <section class="info-section">
+                            <h3>First-time setup</h3>
+                            <ol class="info-numbered">
+                                @foreach (var step in QuickStartItems)
+                                {
+                                    <li>@step</li>
+                                }
+                            </ol>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>Minimum working path</h3>
+                            <ul class="info-list">
+                                @foreach (var item in MinimumPathItems)
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+                    </div>
+                    </div>
+                }
+                else if (_activeTab == PlaybackTabId)
+                {
+                    <div class="@GetTabPaneClass(PlaybackTabId)" role="tabpanel">
+                    <div class="info-layout">
+                        <section class="info-section">
+                            <h3>Playback and ingest modes</h3>
+                            <div class="info-section-grid">
+                                @foreach (var mode in PlaybackModes)
+                                {
+                                    <div class="info-mini-block">
+                                        <strong>@mode.Name</strong>
+                                        <div class="info-section-copy">
+                                            <p>@mode.Description</p>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>Codec guidance</h3>
+                            <ul class="info-list">
+                                @foreach (var item in CodecGuidanceItems)
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+                    </div>
+                    </div>
+                }
+                else if (_activeTab == SecurityTabId)
+                {
+                    <div class="@GetTabPaneClass(SecurityTabId)" role="tabpanel">
+                    <div class="info-layout">
+                        <section class="info-section">
+                            <h3>Access model</h3>
+                            <ul class="info-list">
+                                @foreach (var item in SecurityItems)
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>Operational boundaries</h3>
+                            <div class="info-note">
+                                Keep the app private. The intended model is your own network, your own hardware, plus an authenticated edge such as Tailscale or Cloudflare Zero Trust.
+                            </div>
+                            <ul class="info-list">
+                                @foreach (var item in SecurityBoundaryItems)
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+                    </div>
+                    </div>
+                }
+                else if (_activeTab == TroubleshootingTabId)
+                {
+                    <div class="@GetTabPaneClass(TroubleshootingTabId)" role="tabpanel">
+                    <div class="info-layout">
+                        <section class="info-section">
+                            <h3>Troubleshooting checklist</h3>
+                            <ul class="info-list">
+                                @foreach (var item in TroubleshootingItems)
+                                {
+                                    <li>@item</li>
+                                }
+                            </ul>
+                        </section>
+
+                        <section class="info-section">
+                            <h3>Common symptoms</h3>
+                            <div class="info-section-grid">
+                                @foreach (var item in TroubleshootingScenarios)
+                                {
+                                    <div class="info-mini-block">
+                                        <strong>@item.Name</strong>
+                                        <div class="info-section-copy">
+                                            <p>@item.Description</p>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </section>
+                    </div>
+                    </div>
+                }
+            </div>
         </div>
     </div>
 }
 
 @code {
+    private const string AboutTabId = "about";
+    private const string ThisPageTabId = "this-page";
+    private const string QuickStartTabId = "quick-start";
+    private const string PlaybackTabId = "playback";
+    private const string SecurityTabId = "security";
+    private const string TroubleshootingTabId = "troubleshooting";
+
+    private static readonly IReadOnlyList<HelpTab> Tabs =
+    [
+        new(AboutTabId, "About"),
+        new(ThisPageTabId, "This Page"),
+        new(QuickStartTabId, "Quick Start"),
+        new(PlaybackTabId, "Playback Modes"),
+        new(SecurityTabId, "Remote Access"),
+        new(TroubleshootingTabId, "Troubleshooting")
+    ];
+
+    private static readonly IReadOnlyList<string> SummaryPills =
+    [
+        "Self-hosted",
+        "Low-latency",
+        "Authenticator protected",
+        "Personal use only",
+        "Sky Q remote included"
+    ];
+
+    private static readonly IReadOnlyList<string> AboutPlaybackItems =
+    [
+        "Remote browser playback for your own home Sky Q setup.",
+        "Direct support for HLS and direct MPEG-TS browser playback.",
+        "Managed FFmpeg ingest and transcode for awkward HTTP or RTSP sources.",
+        "Compatibility with H.264 and H.265/HEVC encoder outputs."
+    ];
+
+    private static readonly IReadOnlyList<string> AboutControlItems =
+    [
+        "Built-in Sky Q discovery and LAN remote control.",
+        "Trusted local setup plus authenticator-based external access.",
+        "Saved presets that bind a stream source to a specific Sky Q box.",
+        "Linux install scripts for bootstrap, updates, and service re-runs."
+    ];
+
+    private static readonly IReadOnlyList<string> AboutHowItWorks =
+    [
+        "A Sky Q box is connected to a local HDMI encoder.",
+        "The encoder exposes a stream such as HLS, MPEG-TS, or RTSP.",
+        "This app either plays that stream directly in the browser or normalizes it through FFmpeg first.",
+        "You access the app through your own deployment, typically behind Tailscale or Cloudflare Zero Trust."
+    ];
+
+    private static readonly IReadOnlyList<string> LicenseItems =
+    [
+        "The current workspace does not include a top-level repository LICENSE file for the app itself, so treat repository use and redistribution terms carefully until that is made explicit upstream.",
+        "Bundled `h265web.js` assets carry their own license reference under `_h265web_sdk/LICENSE-Free_EN.MD`.",
+        "Other referenced upstream libraries and protocol implementations keep their own licenses and terms, including `mpegts.js`, `hls.js`, `video.js`, `pyskyqremote`, and `skyq_remote`."
+    ];
+
+    private static readonly IReadOnlyList<string> UsageDisclaimerItems =
+    [
+        "The project does not include pirated streams, third-party content feeds, or any subscription bypass path.",
+        "You should only use it with content you are already entitled to view on your own equipment.",
+        "You are responsible for complying with local law and any applicable Sky terms for your own use of the system."
+    ];
+
+    private static readonly IReadOnlyList<string> QuickStartItems =
+    [
+        "Open `Setup` from a trusted network and save a valid local `ffmpeg.exe` path if you plan to use managed pages.",
+        "Optionally set default HTTP and RTSP stream URLs so the managed pages start with machine-local defaults.",
+        "Generate an authenticator QR code from `Setup` if the app will be accessed from outside the trusted network.",
+        "Start with `HLS` if your encoder already exposes a stable `.m3u8`, or use `Direct` for raw HTTP MPEG-TS tests.",
+        "Use `Managed FFmpeg` or `Managed RTSP` when VLC works but browser playback needs repackaging or transcoding.",
+        "Save working combinations as presets once you know the correct stream URL and matching Sky Q box."
+    ];
+
+    private static readonly IReadOnlyList<string> MinimumPathItems =
+    [
+        "For the simplest working path, test browser playback first before layering in presets or external access.",
+        "If your encoder already emits HLS, use the HLS page first and enable proxy rewrite if CORS or segment URLs cause trouble.",
+        "If your source is RTSP or inconsistent raw TS, go straight to the managed FFmpeg path instead of spending time on browser decoder edge cases."
+    ];
+
+    private static readonly IReadOnlyList<PlaybackMode> PlaybackModes =
+    [
+        new("Direct", "Best for raw HTTP MPEG-TS endpoints when you want the shortest path and the browser decoder already cooperates."),
+        new("HLS", "Best when the encoder already provides a `.m3u8` and you want `hls.js` or native browser HLS playback."),
+        new("Managed FFmpeg", "Best when the source needs normalizing, transcoding, or repackaging before the browser can play it reliably."),
+        new("Managed RTSP", "Best for RTSP sources that must be converted server-side into browser-friendly HLS output."),
+        new("Engines", "Best for comparing different browser playback libraries against the same URL without changing the main pages."),
+        new("Presets", "Best after validation, when you want repeatable launch points that bind a stream path to a specific Sky Q box.")
+    ];
+
+    private static readonly IReadOnlyList<string> CodecGuidanceItems =
+    [
+        "H.264 remains the safer compatibility choice across browsers and platforms.",
+        "HEVC/H.265 can work well, but support still depends on browser, operating system, and hardware decode path.",
+        "If a stream works in VLC but not in the browser, that usually means container, codec profile, audio format, or buffering needs adjustment rather than the source being fundamentally unusable.",
+        "Use managed FFmpeg when you need to move from a barely compatible source to a browser-safe HLS output."
+    ];
+
+    private static readonly IReadOnlyList<string> SecurityItems =
+    [
+        "Trusted setup is limited to localhost, RFC1918 private networks, and Tailscale space.",
+        "External users authenticate with enrolled TOTP authenticator codes.",
+        "Setup and enrollment operations are intentionally restricted to trusted networks only.",
+        "Proxy and control endpoints are meant to stay behind authentication and a private access layer."
+    ];
+
+    private static readonly IReadOnlyList<string> SecurityBoundaryItems =
+    [
+        "Do not expose the app directly to the public internet without a proper access control layer.",
+        "Keep the source streams, proxy routes, and Sky Q control surface scoped to your own environment.",
+        "Machine-local runtime files such as auth settings, presets, cache data, and transcoder state should stay out of source control."
+    ];
+
+    private static readonly IReadOnlyList<string> TroubleshootingItems =
+    [
+        "Check the on-page state and log output first; those surfaces usually tell you whether the failure is in the player, proxy, or transcoder.",
+        "If VLC plays the source but the browser fails, try HLS or managed FFmpeg instead of raw direct playback.",
+        "If managed playback fails immediately, re-check the FFmpeg path in `Setup` and confirm the source URL is valid from the server host.",
+        "If HLS playback stalls, toggle proxy rewrite and confirm the manifest, segments, and any key URLs are all reachable.",
+        "If Sky Q discovery is empty, confirm the app host can see the same private subnet as the box and that scanning is running from the right machine.",
+        "If external login fails, confirm the authenticator enrollment was created from a trusted network and that the device time is correct."
+    ];
+
+    private static readonly IReadOnlyList<TroubleshootingScenario> TroubleshootingScenarios =
+    [
+        new("Black player, valid source", "Usually a browser codec or container issue. Prefer H.264 or run the source through managed FFmpeg."),
+        new("Direct page unstable", "Raw TS can be fragile in browsers. Test the HLS or FFmpeg path instead of forcing the direct decoder."),
+        new("Managed pages blocked", "The saved FFmpeg path is missing or invalid. Re-open Setup and validate the executable path there."),
+        new("Sky Q commands return no useful action", "Select the correct discovered box and inspect the command log because logical failures can still arrive over a successful transport response.")
+    ];
+
     private bool _isOpen;
+    private string _activeTab = AboutTabId;
 
     [Parameter, EditorRequired]
     public string Title { get; set; } = string.Empty;
@@ -44,7 +439,152 @@
     [Parameter]
     public IReadOnlyList<string> Items { get; set; } = [];
 
-    private void Open() => _isOpen = true;
+    private void Open()
+    {
+        _activeTab = AboutTabId;
+        _isOpen = true;
+    }
 
     private void Close() => _isOpen = false;
+
+    private void SelectTab(string tabId)
+    {
+        _activeTab = tabId;
+    }
+
+    private string GetTabButtonClass(string tabId) =>
+        _activeTab == tabId ? "nav-link info-tab-button active" : "nav-link info-tab-button";
+
+    private string GetTabPaneClass(string tabId) =>
+        _activeTab == tabId ? "tab-pane active show" : "tab-pane";
+
+    private IReadOnlyList<string> GetPageWorkflowItems() =>
+        Title switch
+        {
+            "Home" =>
+            [
+                "Use this page as the routing point for your next task rather than a playback surface.",
+                "Confirm whether FFmpeg setup is already complete before opening managed pages.",
+                "Choose the page that matches the stream format you actually have, not the one you hope will work.",
+                "Use presets once a box and stream pairing is already validated."
+            ],
+            "Setup" =>
+            [
+                "Save a valid local `ffmpeg.exe` path first so managed playback has a working backend.",
+                "Set the default HTTP and RTSP source URLs if you want machine-local seed values on managed pages.",
+                "Configure authenticator enrollment only from a trusted network.",
+                "Use the service restart controls if the installed Linux service needs to reconnect after a bad state."
+            ],
+            "Direct Stream" =>
+            [
+                "Paste the raw HTTP stream URL exposed by the encoder.",
+                "Press `Go` to rebuild the proxy path and restart the browser player cleanly.",
+                "Check the generated proxy URL and player state immediately after load.",
+                "Use the log output to decide whether the stream should stay direct or move to HLS or FFmpeg."
+            ],
+            "Managed FFmpeg" =>
+            [
+                "Start from a valid source URL and a confirmed FFmpeg path in Setup.",
+                "Choose the output preset and codec based on browser compatibility first, not ideal source fidelity.",
+                "Save the settings so the server-side state matches what you are testing.",
+                "Press `Go`, then read both the transcoder state and player state before changing settings again."
+            ],
+            "Managed RTSP" =>
+            [
+                "Verify Setup already has a working FFmpeg path and default RTSP URL if you want a seed value.",
+                "Use this page when the source is RTSP and the browser cannot consume it directly.",
+                "Let FFmpeg convert the feed into browser-friendly HLS output.",
+                "If playback is unstable, reduce complexity before tuning codecs: prove the RTSP source and then test safer H.264 output."
+            ],
+            "HLS Stream" =>
+            [
+                "Paste the manifest URL, normally a `.m3u8` from the encoder or managed output.",
+                "Start with proxy rewrite enabled if the source is not already clean on CORS and path handling.",
+                "Press `Go` and check whether the page is using `hls.js` or a native browser HLS path.",
+                "If video loads but HEVC fails, treat that as a client codec problem first."
+            ],
+            "Alternate Player Libraries" =>
+            [
+                "Use the same test source across player engines so you are comparing the engine, not the source.",
+                "Record which engine succeeds, how long startup takes, and whether logs differ.",
+                "Use this page to narrow down library behavior before changing the source or FFmpeg settings."
+            ],
+            "Sky Q Remote" =>
+            [
+                "Load the cached device list first, then force a scan only when discovery needs refreshing.",
+                "Select a specific discovered box before sending any command.",
+                "Use the command log to confirm transport success versus logical command success.",
+                "Keep this page paired with a validated preset or player path once discovery is proven."
+            ],
+            "Presets" =>
+            [
+                "Create presets only after the underlying stream path is already working.",
+                "Bind each preset to the correct box and the exact stream source that matches its encoder.",
+                "Keep names unambiguous so the left navigation remains useful during live switching.",
+                "Use presets to avoid retyping URLs and playback settings once the system is stable."
+            ],
+            "Preset Player" =>
+            [
+                "Launch the saved preset and verify the intended source type opened.",
+                "Use the size controls and mini remote without changing the underlying preset definition.",
+                "If the preset does not behave as expected, fix the preset record rather than compensating in the player shell."
+            ],
+            _ =>
+            [
+                "Read the summary and current page notes first.",
+                "Validate the source URL and setup prerequisites before changing multiple controls at once.",
+                "Use the page log and status output as the first debugging surface."
+            ]
+        };
+
+    private IReadOnlyList<string> GetPageSwitchItems() =>
+        Title switch
+        {
+            "Direct Stream" =>
+            [
+                "Switch to `HLS Stream` if the encoder already exposes a stable `.m3u8`.",
+                "Switch to `Managed FFmpeg` if the source only behaves in VLC or needs repackaging.",
+                "Switch to `Presets` once the source is working and needs a saved launch target."
+            ],
+            "Managed FFmpeg" =>
+            [
+                "Switch to `Direct Stream` if the raw source already works and you want lower overhead.",
+                "Switch to `HLS Stream` if the source already exposes a valid playlist and does not need FFmpeg.",
+                "Switch to `Setup` if the FFmpeg path, defaults, or auth state still need work."
+            ],
+            "Managed RTSP" =>
+            [
+                "Switch to `Managed FFmpeg` if the source is HTTP but still needs normalizing.",
+                "Switch to `Setup` if FFmpeg is not configured or defaults are missing.",
+                "Switch to `Presets` only after RTSP playback is stable."
+            ],
+            "HLS Stream" =>
+            [
+                "Switch to `Managed FFmpeg` if the source manifest is not actually browser-safe.",
+                "Switch to `Direct Stream` only if you also have a raw HTTP TS endpoint worth testing.",
+                "Switch to `Engines` when you need to isolate player library behavior."
+            ],
+            "Setup" =>
+            [
+                "Switch to `Managed FFmpeg` or `Managed RTSP` once FFmpeg is saved.",
+                "Switch to `Home` if you need to choose a simpler first playback path.",
+                "Switch to `Sky Q Remote` once box discovery is the next task."
+            ],
+            "Sky Q Remote" =>
+            [
+                "Switch to `Presets` when you want a saved player-plus-box pairing.",
+                "Switch to `Home` if discovery works and the next task is validating playback.",
+                "Switch to a player page if the box works but the stream path still needs tuning."
+            ],
+            _ =>
+            [
+                "Use `Setup` for FFmpeg path and external login enrollment.",
+                "Use `Sky Q Remote` for box discovery and LAN control.",
+                "Use `Presets` when you are done experimenting and want repeatable launches."
+            ]
+        };
+
+    private sealed record HelpTab(string Id, string Label);
+    private sealed record PlaybackMode(string Name, string Description);
+    private sealed record TroubleshootingScenario(string Name, string Description);
 }

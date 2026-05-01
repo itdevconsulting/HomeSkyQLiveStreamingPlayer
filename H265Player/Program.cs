@@ -91,11 +91,6 @@ var app = builder.Build();
 var mediaTypes = CreateContentTypeProvider();
 var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 
-app.Lifetime.ApplicationStopping.Register(() =>
-{
-    app.Services.GetRequiredService<FfmpegTranscoderManager>().Dispose();
-});
-
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     var server = app.Services.GetService<IServer>();

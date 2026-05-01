@@ -1,8 +1,41 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject NavigationManager NavigationManager
 
-<div class="shell">
-    <NavMenu />
+<div class="@GetShellClass()">
+    <NavMenu IsCollapsed="_isSidebarCollapsed" OnToggleCollapse="ToggleSidebarCollapse" />
     <main class="content-shell">
-        @Body
+        <div @key="_routeKey">
+            @Body
+        </div>
     </main>
 </div>
+
+@code {
+    private bool _isSidebarCollapsed;
+    private string _routeKey = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        _routeKey = NavigationManager.Uri;
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void ToggleSidebarCollapse()
+    {
+        _isSidebarCollapsed = !_isSidebarCollapsed;
+    }
+
+    private string GetShellClass() => _isSidebarCollapsed ? "shell shell-collapsed" : "shell";
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _routeKey = e.Location;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

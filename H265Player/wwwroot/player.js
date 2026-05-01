@@ -788,12 +788,14 @@ window.h265App = {
         });
     },
 
-    enableMiniRemote(panelId, handleId) {
+    enableMiniRemote(panelId, handleId, storageKey) {
         const panel = document.getElementById(panelId);
         const handle = document.getElementById(handleId);
         if (!panel || !handle) {
             return;
         }
+
+        const positionKey = storageKey || panelId;
 
         const clampPosition = (left, top) => {
             const margin = 16;
@@ -808,14 +810,14 @@ window.h265App = {
 
         const savePosition = (left, top) => {
             const clamped = clampPosition(left, top);
-            localStorage.setItem(this._miniRemoteKey(panelId), JSON.stringify(clamped));
+            localStorage.setItem(this._miniRemoteKey(positionKey), JSON.stringify(clamped));
             panel.style.left = `${clamped.left}px`;
             panel.style.top = `${clamped.top}px`;
         };
 
         const loadPosition = () => {
             try {
-                const raw = localStorage.getItem(this._miniRemoteKey(panelId));
+                const raw = localStorage.getItem(this._miniRemoteKey(positionKey));
                 if (!raw) {
                     return { left: 24, top: 24 };
                 }

@@ -1,0 +1,44 @@
+@if (string.Equals(Kind, "video", StringComparison.OrdinalIgnoreCase))
+{
+    <video id="@Id"
+           class="@CssClass"
+           style="@Style"
+           controls="@Controls"
+           playsinline="@PlaysInline"></video>
+}
+else
+{
+    <div id="@Id" class="@CssClass" style="@Style"></div>
+}
+
+@code {
+    private bool _hasRendered;
+
+    [Parameter, EditorRequired]
+    public string Id { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Kind { get; set; } = "div";
+
+    [Parameter]
+    public string CssClass { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Style { get; set; }
+
+    [Parameter]
+    public bool Controls { get; set; }
+
+    [Parameter]
+    public bool PlaysInline { get; set; }
+
+    protected override bool ShouldRender() => !_hasRendered;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _hasRendered = true;
+        }
+    }
+}
