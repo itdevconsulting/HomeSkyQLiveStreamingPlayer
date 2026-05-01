@@ -61,6 +61,32 @@ sudo systemctl restart SkyStreamingService
 sudo journalctl -u SkyStreamingService -f
 ```
 
+Uninstall:
+
+Stop and remove the service only:
+
+```bash
+sudo systemctl stop SkyStreamingService
+sudo systemctl disable SkyStreamingService
+sudo rm -f /etc/systemd/system/SkyStreamingService.service
+sudo systemctl daemon-reload
+```
+
+Remove the deployed app and local runtime state as well:
+
+```bash
+sudo rm -rf /opt/skystreamingservice
+sudo rm -rf /var/lib/skystreamingservice
+sudo rm -rf /usr/local/src/homeskyqlivestreamingplayer
+sudo userdel skystreamingservice 2>/dev/null || true
+sudo groupdel skystreamingservice 2>/dev/null || true
+```
+
+Notes:
+
+- This does not uninstall system-wide `.NET` or `ffmpeg` packages because they may be shared with other apps.
+- If you want to preserve your local presets and auth/runtime files, skip removing `/opt/skystreamingservice` and `/var/lib/skystreamingservice`.
+
 Default app URL:
 
 ```text

@@ -16,6 +16,7 @@ This project is designed for self-hosted home setups where a Sky Q box is connec
 - 🎛️ Built-in Sky Q discovery and remote control
 - 🔒 Authenticator-based external access with trusted local setup
 - 🐧 Self-hosted deployment with Linux install scripts for updates and re-runs
+- 🪟 Windows PowerShell installer with Windows Service deployment
 
 ## 🧠 How It Works
 
@@ -64,6 +65,31 @@ wget -qO- https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamin
 
 Detailed Linux deployment notes are in [LINUX-INSTALL.md](LINUX-INSTALL.md).
 
+Linux uninstall details are also covered there, including service-only removal and full cleanup commands.
+
+## 🪟 Recommended Windows Install
+
+Quick install from GitHub:
+
+```powershell
+$tmp = Join-Path $env:TEMP "install-from-github.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.ps1 -OutFile $tmp
+powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+```
+
+The Windows installer:
+
+- installs the `.NET 10` SDK if needed
+- downloads FFmpeg if needed
+- publishes the app in `Release`
+- installs the Windows service `SkyStreamingService`
+- uses display name `SkyQ Streaming Service`
+- preserves local runtime state on re-runs
+
+Detailed Windows deployment notes are in [WINDOWS-INSTALL.md](WINDOWS-INSTALL.md).
+
+Windows uninstall details are also covered there, including service-only removal and full cleanup commands.
+
 ## 📦 What It Does
 
 - discovers Sky Q boxes on the local private network
@@ -91,6 +117,23 @@ The bootstrap installer:
 - fully replaces `/opt/skystreamingservice/app` with the latest published build
 - writes or updates the `SkyStreamingService` systemd service and restarts it
 - preserves local runtime state across upgrades
+
+## 🛠️ Windows Installer Summary
+
+The Windows installer:
+
+- downloads the current repo snapshot from GitHub or runs from a local checkout
+- installs the `.NET 10` SDK into `C:\Program Files\dotnet` if needed
+- downloads the FFmpeg Windows essentials ZIP if needed
+- publishes the app in `Release`
+- recreates and restarts the `SkyStreamingService` Windows service
+- deploys the published app to `C:\ProgramData\SkyQStreamingService\app`
+- preserves `local-settings.json`, `auth-settings.json`, `transcoder-settings.json`, `direct-skyq-presets.json`, `skyq-cache.json`, and `runtime\` on re-runs
+
+Uninstall guidance:
+
+- Linux: see [LINUX-INSTALL.md](LINUX-INSTALL.md) for service removal and optional full purge commands
+- Windows: see [WINDOWS-INSTALL.md](WINDOWS-INSTALL.md) for service removal and optional full purge commands
 
 After install, open:
 

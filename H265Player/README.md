@@ -66,6 +66,26 @@ This is especially useful for:
 
 FFmpeg is not bundled with the app. You install it locally and then configure the `ffmpeg.exe` path in the app's `Setup` page. The managed `FFmpeg` and `RTSP` pages, and any presets that depend on them, require this to be configured before use.
 
+For Windows service deployments, the PowerShell installer can download the FFmpeg Windows essentials build automatically and seed the local setup file with the detected `ffmpeg.exe` path on first install.
+
+## Windows Service Install
+
+The repo now includes a Windows installer path that can:
+
+- publish the app locally
+- download FFmpeg if it is not already present
+- install the app as the Windows service `SkyStreamingService`
+- use the display name `SkyQ Streaming Service`
+- preserve local runtime files across re-runs
+
+The installer deploys the running app under `C:\ProgramData\SkyQStreamingService\app`.
+
+See the repo root documentation for details:
+
+- `WINDOWS-INSTALL.md`
+- `scripts/install-windows.ps1`
+- `scripts/install-from-github.ps1`
+
 ## External Access
 
 The solution is designed to work externally as well as on the local network.

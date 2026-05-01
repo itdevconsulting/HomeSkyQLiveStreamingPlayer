@@ -12,9 +12,26 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Hosting.WindowsServices;
 
-var builder = WebApplication.CreateBuilder(args);
+var webApplicationOptions = new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = WindowsServiceHelpers.IsWindowsService()
+        ? AppContext.BaseDirectory
+        : default
+};
+
+var builder = WebApplication.CreateBuilder(webApplicationOptions);
 builder.WebHost.UseStaticWebAssets();
+
+if (OperatingSystem.IsWindows())
+{
+    builder.Host.UseWindowsService(options =>
+    {
+        options.ServiceName = "SkyQ Streaming Service";
+    });
+}
 
 builder.Services.AddHttpClient("stream-proxy")
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
