@@ -281,7 +281,7 @@ function Create-Service {
     }
 
     $binaryPath = "`"$appExe`" --urls `"http://0.0.0.0:$Port`""
-    $serviceAccount = "LocalService"
+    $serviceAccount = "NT AUTHORITY\LocalService"
 
     Write-Log "Creating Windows service $ServiceDisplayName"
     Invoke-Sc -Arguments @(
