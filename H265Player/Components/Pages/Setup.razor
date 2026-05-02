@@ -49,27 +49,6 @@ else
         <button type="button" @onclick="SaveAsync">Save setup</button>
     </div>
 
-    <div class="setup-service-grid">
-        <div class="panel-copy">
-            <p class="eyebrow">Service</p>
-            <h2>Streaming Service</h2>
-            <p class="lede">Use this if the proxy path wedges and you need the installed service to reconnect. Self-restart is only enabled when this app detects the Linux systemd service that is configured to restart automatically.</p>
-        </div>
-
-        @if (_serviceRestartStatus is not null)
-        {
-            <div class="setup-status @(_serviceRestartStatus.CanSelfRestart ? "configured" : "missing")">
-                <strong>@ServiceRestartHeading</strong>
-                <span>@_serviceRestartStatus.Message</span>
-                <span class="setup-status-meta">Mode: @_serviceRestartStatus.ServiceMode</span>
-            </div>
-        }
-
-        <div class="toolbar">
-            <button type="button" disabled="@RestartButtonDisabled" @onclick="RestartStreamingServiceAsync">@RestartButtonText</button>
-        </div>
-    </div>
-
     <div class="setup-auth-grid">
         <div class="panel-copy">
             <p class="eyebrow">Authenticator</p>
@@ -162,26 +141,8 @@ else
     private string _qrCodeDataUrl = string.Empty;
     private string _manualKey = string.Empty;
     private List<AuthAccountSummary> _accounts = [];
-    private ServiceRestartStatusResponse? _serviceRestartStatus;
-    private bool _serviceRestartBusy;
 
     private bool _loaded;
-    private bool RestartButtonDisabled =>
-        _serviceRestartBusy || _serviceRestartStatus is not { CanSelfRestart: true, RestartScheduled: false };
-
-    private string RestartButtonText =>
-        _serviceRestartBusy
-            ? "Restarting..."
-            : _serviceRestartStatus?.RestartScheduled == true
-                ? "Restart queued"
-                : "Restart streaming service";
-
-    private string ServiceRestartHeading =>
-        _serviceRestartStatus?.RestartScheduled == true
-            ? "Restart pending"
-            : _serviceRestartStatus?.CanSelfRestart == true
-                ? "Self-restart ready"
-                : "Self-restart unavailable";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -243,7 +204,6 @@ else
             : "Managed playback is blocked until FFmpeg is configured.";
 
         await LoadAccountsAsync();
-        await LoadServiceRestartStatusAsync();
     }
 
     private async Task SaveAsync()
@@ -414,63 +374,6 @@ else
         else if (accountsResponse.Status != StatusCodes.Status403Forbidden)
         {
             ErrorText = accountsResponse.Text;
-        }
-    }
-
-    private async Task LoadServiceRestartStatusAsync()
-    {
-        var serviceResponse = await JS.InvokeAsync<ApiEnvelope<ServiceRestartStatusResponse>>("h265Auth.fetchJson", "/api/service/status");
-        if (serviceResponse.Ok && serviceResponse.Json is not null)
-        {
-            _serviceRestartStatus = serviceResponse.Json;
-            return;
-        }
-
-        if (serviceResponse.Status == StatusCodes.Status403Forbidden)
-        {
-            return;
-        }
-
-        ErrorText = string.IsNullOrWhiteSpace(serviceResponse.Text)
-            ? "Unable to load restart status."
-            : serviceResponse.Text;
-    }
-
-    private async Task RestartStreamingServiceAsync()
-    {
-        ErrorText = string.Empty;
-        SuccessText = string.Empty;
-
-        if (RestartButtonDisabled)
-        {
-            return;
-        }
-
-        _serviceRestartBusy = true;
-
-        try
-        {
-            var response = await JS.InvokeAsync<ApiEnvelope<ServiceRestartStatusResponse>>("h265Auth.fetchJson", "/api/service/restart", new
-            {
-                method = "POST"
-            });
-
-            if (response.Json is not null)
-            {
-                _serviceRestartStatus = response.Json;
-            }
-
-            if (!response.Ok)
-            {
-                ErrorText = response.Json?.Message ?? response.Text;
-                return;
-            }
-
-            SuccessText = _serviceRestartStatus?.Message ?? "Restart requested. Reload the page in a few seconds if it does not reconnect on its own.";
-        }
-        finally
-        {
-            _serviceRestartBusy = false;
         }
     }
 

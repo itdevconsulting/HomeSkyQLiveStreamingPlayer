@@ -32,6 +32,36 @@
         </div>
     </div>
 
+    <div class="setup-service-grid">
+        <div class="panel-copy">
+            <p class="eyebrow">Service</p>
+            <h2>Streaming Service</h2>
+            <p class="lede">Use this if the proxy path wedges and you need the installed service to reconnect. The restart control only lights up when the current host mode supports self-restart.</p>
+        </div>
+
+        @if (_serviceRestartStatus is not null)
+        {
+            <div class="setup-status @(_serviceRestartStatus.CanSelfRestart ? "configured" : "missing")">
+                <strong>@ServiceRestartHeading</strong>
+                <span>@_serviceRestartStatus.Message</span>
+                <span class="setup-status-meta">Mode: @_serviceRestartStatus.ServiceMode</span>
+            </div>
+        }
+
+        <div class="toolbar">
+            <button type="button" disabled="@RestartButtonDisabled" @onclick="RestartStreamingServiceAsync">@RestartButtonText</button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(ErrorText))
+        {
+            <div class="setup-inline-error">@ErrorText</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(SuccessText))
+        {
+            <div class="setup-inline-success">@SuccessText</div>
+        }
+    </div>
+
     <div class="home-grid">
         <a class="home-card" href="/setup">
             <strong>Setup</strong>
@@ -73,6 +103,7 @@
     [
         "Direct is the simplest raw stream test page for HTTP MPEG-TS input.",
         "Setup configures the local FFmpeg path once for this machine. The managed FFmpeg, RTSP, and managed preset paths depend on it.",
+        "Streaming Service exposes a restart control on the home page for installed service deployments that support self-restart.",
         "FFmpeg and RTSP are the managed server-side paths. They use the saved FFmpeg settings and generate browser-friendly HLS output.",
         "HLS is the straightforward browser page for .m3u8 playback with optional proxy rewriting.",
         "Engines is the comparison page for trying different browser player libraries against the same stream.",
@@ -80,7 +111,28 @@
     ];
 
     private string AccessStatus { get; set; } = "Loading";
+    private string ErrorText { get; set; } = string.Empty;
+    private string SuccessText { get; set; } = string.Empty;
     private bool ShowLogout { get; set; }
+    private ServiceRestartStatusResponse? _serviceRestartStatus;
+    private bool _serviceRestartBusy;
+
+    private bool RestartButtonDisabled =>
+        _serviceRestartBusy || _serviceRestartStatus is not { CanSelfRestart: true, RestartScheduled: false };
+
+    private string RestartButtonText =>
+        _serviceRestartBusy
+            ? "Restarting..."
+            : _serviceRestartStatus?.RestartScheduled == true
+                ? "Restart queued"
+                : "Restart streaming service";
+
+    private string ServiceRestartHeading =>
+        _serviceRestartStatus?.RestartScheduled == true
+            ? "Restart pending"
+            : _serviceRestartStatus?.CanSelfRestart == true
+                ? "Self-restart ready"
+                : "Self-restart unavailable";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -96,29 +148,97 @@
             if (status is null)
             {
                 AccessStatus = "Unknown";
-                return;
             }
-
-            AccessStatus = status.TrustedNetwork
-                ? "Trusted network"
-                : status.IsAuthenticated
-                    ? string.IsNullOrWhiteSpace(status.Email)
-                        ? "Authenticator session"
-                        : $"Authenticator session ({status.Email})"
-                : "External login required";
-            ShowLogout = status.IsAuthenticated && !status.TrustedNetwork;
-            await InvokeAsync(StateHasChanged);
+            else
+            {
+                AccessStatus = status.TrustedNetwork
+                    ? "Trusted network"
+                    : status.IsAuthenticated
+                        ? string.IsNullOrWhiteSpace(status.Email)
+                            ? "Authenticator session"
+                            : $"Authenticator session ({status.Email})"
+                    : "External login required";
+                ShowLogout = status.IsAuthenticated && !status.TrustedNetwork;
+            }
         }
         catch
         {
             AccessStatus = "Unknown";
         }
+
+        await LoadServiceRestartStatusAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LogoutAsync()
     {
         await JS.InvokeVoidAsync("h265Auth.logout");
         NavigationManager.NavigateTo("/auth/login", forceLoad: true);
+    }
+
+    private async Task LoadServiceRestartStatusAsync()
+    {
+        var serviceResponse = await JS.InvokeAsync<ApiEnvelope<ServiceRestartStatusResponse>>("h265Auth.fetchJson", "/api/service/status");
+        if (serviceResponse.Ok && serviceResponse.Json is not null)
+        {
+            _serviceRestartStatus = serviceResponse.Json;
+            return;
+        }
+
+        if (serviceResponse.Status == StatusCodes.Status403Forbidden)
+        {
+            return;
+        }
+
+        ErrorText = string.IsNullOrWhiteSpace(serviceResponse.Text)
+            ? "Unable to load restart status."
+            : serviceResponse.Text;
+    }
+
+    private async Task RestartStreamingServiceAsync()
+    {
+        ErrorText = string.Empty;
+        SuccessText = string.Empty;
+
+        if (RestartButtonDisabled)
+        {
+            return;
+        }
+
+        _serviceRestartBusy = true;
+
+        try
+        {
+            var response = await JS.InvokeAsync<ApiEnvelope<ServiceRestartStatusResponse>>("h265Auth.fetchJson", "/api/service/restart", new
+            {
+                method = "POST"
+            });
+
+            if (response.Json is not null)
+            {
+                _serviceRestartStatus = response.Json;
+            }
+
+            if (!response.Ok)
+            {
+                ErrorText = response.Json?.Message ?? response.Text;
+                return;
+            }
+
+            SuccessText = _serviceRestartStatus?.Message ?? "Restart requested. Reload the page in a few seconds if it does not reconnect on its own.";
+        }
+        finally
+        {
+            _serviceRestartBusy = false;
+        }
+    }
+
+    private sealed class ApiEnvelope<T>
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public T? Json { get; set; }
     }
 
     [Inject]
