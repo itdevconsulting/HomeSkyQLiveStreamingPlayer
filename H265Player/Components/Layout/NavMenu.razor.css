@@ -7,6 +7,9 @@
     position: sticky;
     top: 0;
     height: 100vh;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     transition: padding 160ms ease;
 }
@@ -153,9 +156,13 @@
 }
 
 .nav-scroll {
-    height: calc(100vh - 4.35rem);
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding-right: 0.15rem;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }

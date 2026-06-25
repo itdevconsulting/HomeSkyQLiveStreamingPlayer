@@ -74,7 +74,99 @@ function buildManagedPlayer(hostId, onStatus, onLog, url, autoPlay, ignoreAudio)
     });
 
     player.load_media(url);
+    attachManagedControls(hostId, player);
+    observeManagedHostSize(hostId, player);
     return player;
+}
+
+function getManagedHostSize(hostId) {
+    const host = document.getElementById(hostId);
+    if (!host) {
+        return null;
+    }
+
+    const rect = host.getBoundingClientRect();
+    const width = Math.max(1, Math.round(rect.width || host.clientWidth || 0));
+    const height = Math.max(1, Math.round(rect.height || host.clientHeight || 520));
+    return { host, width, height };
+}
+
+function resizeManagedPlayer(hostId, player) {
+    if (!player || typeof player.resize !== "function") {
+        return;
+    }
+
+    const size = getManagedHostSize(hostId);
+    if (!size) {
+        return;
+    }
+
+    player.resize(size.width, size.height);
+}
+
+function observeManagedHostSize(hostId, player) {
+    const size = getManagedHostSize(hostId);
+    if (!size || typeof ResizeObserver === "undefined") {
+        window.requestAnimationFrame(() => resizeManagedPlayer(hostId, player));
+        return;
+    }
+
+    player.__hostResizeObserver?.disconnect?.();
+    player.__hostResizeObserver = new ResizeObserver(() => {
+        window.requestAnimationFrame(() => resizeManagedPlayer(hostId, player));
+    });
+    player.__hostResizeObserver.observe(size.host);
+    window.requestAnimationFrame(() => resizeManagedPlayer(hostId, player));
+}
+
+function attachManagedControls(hostId, player) {
+    const host = document.getElementById(hostId);
+    if (!host || host.querySelector(".managed-player-controls")) {
+        return;
+    }
+
+    host.classList.add("managed-player-host");
+
+    const controls = document.createElement("div");
+    controls.className = "managed-player-controls";
+
+    const makeButton = (label, title, action) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.title = title;
+        button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            action(button);
+        });
+        return button;
+    };
+
+    let muted = false;
+    controls.append(
+        makeButton("Play", "Play", () => player.play?.()),
+        makeButton("Pause", "Pause", () => player.pause?.()),
+        makeButton("Mute", "Mute", (button) => {
+            muted = !muted;
+            player.set_voice?.(muted ? 0 : 1);
+            button.textContent = muted ? "Sound" : "Mute";
+            button.title = muted ? "Restore sound" : "Mute";
+        }),
+        makeButton("Full", "Fullscreen", () => player.fullScreen?.())
+    );
+
+    host.appendChild(controls);
+}
+
+function releaseManagedPlayer(player, hostId) {
+    player?.__hostResizeObserver?.disconnect?.();
+    player?.release?.();
+
+    const host = document.getElementById(hostId);
+    if (host) {
+        host.innerHTML = "";
+        host.classList.remove("managed-player-host");
+    }
 }
 
 function unmuteManagedHost(hostId) {
@@ -375,12 +467,8 @@ window.h265App = {
             return;
         }
 
-        this._ffmpegPlayer.release();
+        releaseManagedPlayer(this._ffmpegPlayer, "ffmpeg-player-host");
         this._ffmpegPlayer = null;
-        const host = document.getElementById("ffmpeg-player-host");
-        if (host) {
-            host.innerHTML = "";
-        }
     },
 
     managedReleaseHost(hostId) {
@@ -392,12 +480,8 @@ window.h265App = {
             return;
         }
 
-        this._presetManagedPlayer.release();
+        releaseManagedPlayer(this._presetManagedPlayer, hostId);
         this._presetManagedPlayer = null;
-        const host = document.getElementById(hostId);
-        if (host) {
-            host.innerHTML = "";
-        }
     },
 
     rtspLoad(manifestUrl, autoPlay, ignoreAudio) {
@@ -413,12 +497,18 @@ window.h265App = {
             return;
         }
 
-        this._rtspPlayer.release();
+        releaseManagedPlayer(this._rtspPlayer, "rtsp-player-host");
         this._rtspPlayer = null;
-        const host = document.getElementById("rtsp-player-host");
-        if (host) {
-            host.innerHTML = "";
-        }
+    },
+
+    resizeManagedHost(hostId) {
+        const player = hostId === "ffmpeg-player-host"
+            ? this._ffmpegPlayer
+            : hostId === "rtsp-player-host"
+                ? this._rtspPlayer
+                : this._presetManagedPlayer;
+
+        resizeManagedPlayer(hostId, player);
     },
 
     _showElement(id, visible) {
@@ -854,41 +944,68 @@ window.h265App = {
         let dragging = false;
         let lastX = 0;
         let lastY = 0;
+        let pointerId = null;
 
         const move = (event) => {
-            if (!dragging) {
+            if (!dragging || (pointerId !== null && event.pointerId !== pointerId)) {
                 return;
             }
 
+            event.preventDefault();
             lastX = event.clientX;
             lastY = event.clientY;
             const dx = event.clientX - startX;
             const dy = event.clientY - startY;
-            panel.style.left = `${originLeft + dx}px`;
-            panel.style.top = `${originTop + dy}px`;
+            const next = clampPosition(originLeft + dx, originTop + dy);
+            panel.style.left = `${next.left}px`;
+            panel.style.top = `${next.top}px`;
         };
 
-        const up = () => {
-            if (!dragging) {
+        const up = (event) => {
+            if (!dragging || (pointerId !== null && event?.pointerId !== pointerId)) {
                 return;
             }
 
             dragging = false;
             savePosition(originLeft + (lastX - startX), originTop + (lastY - startY));
+            if (pointerId !== null && typeof handle.releasePointerCapture === "function") {
+                try {
+                    handle.releasePointerCapture(pointerId);
+                } catch {
+                }
+            }
+
+            pointerId = null;
             document.removeEventListener("pointermove", move);
             document.removeEventListener("pointerup", up);
+            document.removeEventListener("pointercancel", up);
         };
 
         handle.addEventListener("pointerdown", (event) => {
+            if (event.button !== undefined && event.button !== 0) {
+                return;
+            }
+
             dragging = true;
+            pointerId = event.pointerId ?? null;
             startX = event.clientX;
             startY = event.clientY;
             lastX = event.clientX;
             lastY = event.clientY;
             originLeft = parseInt(panel.style.left || "24", 10);
             originTop = parseInt(panel.style.top || "24", 10);
-            document.addEventListener("pointermove", move);
+            event.preventDefault();
+
+            if (pointerId !== null && typeof handle.setPointerCapture === "function") {
+                try {
+                    handle.setPointerCapture(pointerId);
+                } catch {
+                }
+            }
+
+            document.addEventListener("pointermove", move, { passive: false });
             document.addEventListener("pointerup", up);
+            document.addEventListener("pointercancel", up);
         });
 
         window.addEventListener("resize", () => {

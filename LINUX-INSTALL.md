@@ -33,6 +33,14 @@ chmod +x scripts/install-linux.sh
 sudo ./scripts/install-linux.sh
 ```
 
+Optional second listener with app auth bypassed:
+
+```bash
+sudo UNAUTHENTICATED_PORT=5222 ./scripts/install-linux.sh
+```
+
+Use that second port only behind your existing edge authentication layer. The normal `PORT` listener keeps the app's built-in authenticator flow.
+
 What it does:
 
 - clones or updates `https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer`
@@ -112,6 +120,7 @@ Cloudflare Zero Trust / Tailscale:
 - keep the app private and put Cloudflare Zero Trust or Tailscale in front of it
 - first-time authenticator enrollment must still be done from a trusted local/Tailscale network
 - for Cloudflare, point the private origin/tunnel at `http://127.0.0.1:5221`
+- if you enable `UNAUTHENTICATED_PORT`, point your edge at that second port instead and let the edge own authentication
 
 Source checkout used by the bootstrap installer:
 

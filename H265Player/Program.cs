@@ -24,6 +24,16 @@ var webApplicationOptions = new WebApplicationOptions
 
 var builder = WebApplication.CreateBuilder(webApplicationOptions);
 builder.WebHost.UseStaticWebAssets();
+var accessOptions = new AccessOptions(NormalizeOptionalPort(builder.Configuration.GetValue<int?>("Access:UnauthenticatedPort")));
+builder.Services.AddSingleton(accessOptions);
+builder.WebHost.ConfigureKestrel((context, options) =>
+{
+    var unauthenticatedPort = NormalizeOptionalPort(context.Configuration.GetValue<int?>("Access:UnauthenticatedPort"));
+    if (unauthenticatedPort is int port)
+    {
+        options.ListenAnyIP(port);
+    }
+});
 
 if (OperatingSystem.IsWindows())
 {
@@ -141,8 +151,10 @@ app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
     var trustedNetworks = context.RequestServices.GetRequiredService<TrustedNetworkService>();
-    var isTrusted = trustedNetworks.IsTrustedRequest(context);
+    var accessPolicy = context.RequestServices.GetRequiredService<AccessOptions>();
+    var isTrusted = HasPrivilegedAccess(context, trustedNetworks, accessPolicy);
     context.Items["TrustedNetwork"] = isTrusted;
+    context.Items["UnauthenticatedAccess"] = accessPolicy.IsUnauthenticatedEndpoint(context);
 
     if (IsAnonymousPath(context.Request.Path) || isTrusted || context.User.Identity?.IsAuthenticated == true)
     {
@@ -251,10 +263,11 @@ static async Task<IResult> SaveLocalSetupAsync(
     LocalSetupSettings settings,
     HttpContext httpContext,
     TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
     LocalSetupStore store,
     CancellationToken cancellationToken)
 {
-    if (!trustedNetworkService.IsTrustedRequest(httpContext))
+    if (!HasPrivilegedAccess(httpContext, trustedNetworkService, accessOptions))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -286,9 +299,10 @@ static async Task<IResult> SaveLocalSetupAsync(
 static IResult GetServiceRestartStatusAsync(
     HttpContext httpContext,
     TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
     ServiceRestartCoordinator restartCoordinator)
 {
-    if (!trustedNetworkService.IsTrustedRequest(httpContext))
+    if (!HasPrivilegedAccess(httpContext, trustedNetworkService, accessOptions))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -299,9 +313,10 @@ static IResult GetServiceRestartStatusAsync(
 static IResult RestartServiceAsync(
     HttpContext httpContext,
     TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
     ServiceRestartCoordinator restartCoordinator)
 {
-    if (!trustedNetworkService.IsTrustedRequest(httpContext))
+    if (!HasPrivilegedAccess(httpContext, trustedNetworkService, accessOptions))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -315,9 +330,11 @@ static IResult RestartServiceAsync(
 static IResult GetAuthStatusAsync(
     HttpContext context,
     TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
     AuthSettingsStore authStore)
 {
-    var trusted = trustedNetworkService.IsTrustedRequest(context);
+    var unauthenticatedAccess = accessOptions.IsUnauthenticatedEndpoint(context);
+    var trusted = unauthenticatedAccess || trustedNetworkService.IsTrustedRequest(context);
     var isAuthenticated = context.User.Identity?.IsAuthenticated == true;
     var authSettings = authStore.Get();
     var email = trusted || isAuthenticated
@@ -328,6 +345,7 @@ static IResult GetAuthStatusAsync(
 
     return Results.Ok(new AuthStatusResponse(
         TrustedNetwork: trusted,
+        UnauthenticatedAccess: unauthenticatedAccess,
         RequiresAuthentication: !trusted,
         IsAuthenticated: isAuthenticated,
         AuthenticatorConfigured: authSettings.IsConfigured,
@@ -340,9 +358,10 @@ static async Task<IResult> LoginAsync(
     AuthLoginRequest request,
     AuthSettingsStore authStore,
     AuthenticatorService authenticator,
-    TrustedNetworkService trustedNetworkService)
+    TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions)
 {
-    if (trustedNetworkService.IsTrustedRequest(context))
+    if (HasPrivilegedAccess(context, trustedNetworkService, accessOptions))
     {
         return Results.Ok(new { success = true, trustedNetwork = true });
     }
@@ -396,11 +415,12 @@ static async Task<IResult> EnrollAuthenticatorAsync(
     HttpContext context,
     AuthEnrollmentRequest request,
     TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
     AuthenticatorService authenticator,
     AuthSettingsStore authStore,
     CancellationToken cancellationToken)
 {
-    if (!trustedNetworkService.IsTrustedRequest(context))
+    if (!HasPrivilegedAccess(context, trustedNetworkService, accessOptions))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -419,9 +439,10 @@ static async Task<IResult> EnrollAuthenticatorAsync(
 static IResult GetAuthAccountsAsync(
     HttpContext context,
     TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
     AuthSettingsStore authStore)
 {
-    if (!trustedNetworkService.IsTrustedRequest(context))
+    if (!HasPrivilegedAccess(context, trustedNetworkService, accessOptions))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -433,10 +454,11 @@ static async Task<IResult> DeleteAuthAccountAsync(
     string email,
     HttpContext context,
     TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
     AuthSettingsStore authStore,
     CancellationToken cancellationToken)
 {
-    if (!trustedNetworkService.IsTrustedRequest(context))
+    if (!HasPrivilegedAccess(context, trustedNetworkService, accessOptions))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -824,6 +846,24 @@ static bool IsAppCookieName(string cookieName) =>
     cookieName.StartsWith("H265Player.", StringComparison.OrdinalIgnoreCase) ||
     cookieName.StartsWith(".AspNetCore.Antiforgery.", StringComparison.OrdinalIgnoreCase);
 
+static bool HasPrivilegedAccess(HttpContext context, TrustedNetworkService trustedNetworkService, AccessOptions accessOptions) =>
+    accessOptions.IsUnauthenticatedEndpoint(context) || trustedNetworkService.IsTrustedRequest(context);
+
+static int? NormalizeOptionalPort(int? port)
+{
+    if (port is null or <= 0)
+    {
+        return null;
+    }
+
+    if (port > IPEndPoint.MaxPort)
+    {
+        throw new InvalidOperationException($"Configured port {port.Value} is out of range.");
+    }
+
+    return port;
+}
+
 static async Task<bool> IsAllowedHostAsync(string host, CancellationToken cancellationToken)
 {
     if (IPAddress.TryParse(host, out var ipAddress))
@@ -851,4 +891,10 @@ static bool IsAllowedAddress(IPAddress address)
            && bytes[0] == 192
            && bytes[1] == 168
            && (bytes[2] & 0xF0) == 0;
+}
+
+sealed record AccessOptions(int? UnauthenticatedPort)
+{
+    public bool IsUnauthenticatedEndpoint(HttpContext context) =>
+        UnauthenticatedPort is int port && context.Connection.LocalPort == port;
 }

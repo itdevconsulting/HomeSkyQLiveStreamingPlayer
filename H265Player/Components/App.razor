@@ -128,13 +128,20 @@ body {
     position: sticky;
     top: 0;
     height: 100vh;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
 }
 
 .nav-scroll {
-    height: calc(100vh - 1.4rem);
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding-right: 0.2rem;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
@@ -627,6 +634,46 @@ code {
     overflow: hidden;
 }
 
+.managed-player-host {
+    position: relative;
+}
+
+.managed-player-host canvas,
+.managed-player-host video {
+    max-width: 100%;
+}
+
+.managed-player-controls {
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+    padding: 0.45rem;
+    border-radius: 8px;
+    background: rgba(6, 9, 12, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    opacity: 0.92;
+    transform: translateY(0);
+    transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.managed-player-host:hover .managed-player-controls,
+.managed-player-host:focus-within .managed-player-controls {
+    opacity: 1;
+}
+
+.managed-player-controls button {
+    min-height: 2rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+}
+
 .video-host {
     width: 100%;
     min-height: 420px;
@@ -679,6 +726,10 @@ code {
     gap: 0.75rem;
     margin-bottom: 0.9rem;
     cursor: move;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .mini-remote-close {
@@ -1687,7 +1738,7 @@ code {
     <script src="/vendor/mpegts.min.js"></script>
     <script src="/vendor/hls.min.js"></script>
     <script src="/vendor/video.min.js"></script>
-    <script src="/player.js?v=20260430-auth4"></script>
+    <script src="/player.js?v=20260625-touch1"></script>
     <script src="/_framework/blazor.web.js"></script>
 </body>
 </html>

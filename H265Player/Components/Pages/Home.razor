@@ -153,12 +153,18 @@
             {
                 AccessStatus = status.TrustedNetwork
                     ? "Trusted network"
+                    : status.UnauthenticatedAccess
+                        ? "Unauthenticated port"
                     : status.IsAuthenticated
                         ? string.IsNullOrWhiteSpace(status.Email)
                             ? "Authenticator session"
                             : $"Authenticator session ({status.Email})"
                     : "External login required";
                 ShowLogout = status.IsAuthenticated && !status.TrustedNetwork;
+                if (status.UnauthenticatedAccess)
+                {
+                    ShowLogout = false;
+                }
             }
         }
         catch

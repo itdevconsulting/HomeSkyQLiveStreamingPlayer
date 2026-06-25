@@ -180,7 +180,7 @@
                 return;
             }
 
-            _isTrusted = status.TrustedNetwork;
+            _isTrusted = status.TrustedNetwork || status.UnauthenticatedAccess;
             _isAuthenticated = status.IsAuthenticated;
             _userName = status.Email ?? string.Empty;
             await InvokeAsync(StateHasChanged);

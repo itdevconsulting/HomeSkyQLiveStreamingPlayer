@@ -10,7 +10,7 @@
         <div class="panel-copy">
             <p class="eyebrow">Authentication</p>
             <h1>Authenticator Login</h1>
-            <p class="lede">External access requires a valid authenticator code. Trusted local, Tailscale, and loopback access bypass this check automatically.</p>
+            <p class="lede">External access requires a valid authenticator code. Trusted local, Tailscale, loopback, or a dedicated unauthenticated edge-backed port bypass this check automatically.</p>
         </div>
     </div>
 
@@ -21,11 +21,13 @@
             <span>Checking access requirements.</span>
         </div>
     }
-    else if (Status.TrustedNetwork)
+    else if (Status.TrustedNetwork || Status.UnauthenticatedAccess)
     {
         <div class="setup-status configured">
-            <strong>Trusted network</strong>
-            <span>Authenticator login is not required from this network. You can continue straight into the app.</span>
+            <strong>@(Status.UnauthenticatedAccess ? "Unauthenticated port" : "Trusted network")</strong>
+            <span>@(Status.UnauthenticatedAccess
+                ? "This listener is configured to bypass app authentication. You can continue straight into the app."
+                : "Authenticator login is not required from this network. You can continue straight into the app.")</span>
         </div>
         <div class="toolbar">
             <button type="button" @onclick="ContinueAsync">Continue</button>
@@ -84,13 +86,13 @@
             ErrorText = string.IsNullOrWhiteSpace(response.Text)
                 ? "Unable to load authentication status."
                 : response.Text;
-            Status = new AuthStatusResponse(false, true, false, true, null, null);
+            Status = new AuthStatusResponse(false, false, true, false, true, null, null);
             await InvokeAsync(StateHasChanged);
             return;
         }
 
         Status = response.Json;
-        if (Status?.TrustedNetwork == true)
+        if (Status is { TrustedNetwork: true } || Status is { UnauthenticatedAccess: true })
         {
             await ContinueAsync();
             return;

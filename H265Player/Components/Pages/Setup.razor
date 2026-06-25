@@ -4,12 +4,12 @@
 
 <PageTitle>Setup</PageTitle>
 
-@if (_authStatus is not null && !_authStatus.TrustedNetwork)
+@if (_authStatus is not null && !HasPrivilegedAccess)
 {
     <section class="panel">
         <div class="setup-status missing">
-            <strong>Trusted network required</strong>
-            <span>Setup and authenticator enrollment are only available from localhost, local private ranges, or Tailscale addresses.</span>
+            <strong>Privileged access required</strong>
+            <span>Setup and authenticator enrollment are only available from localhost, local private ranges, Tailscale, or a configured unauthenticated port.</span>
         </div>
     </section>
 }
@@ -53,7 +53,7 @@ else
         <div class="panel-copy">
             <p class="eyebrow">Authenticator</p>
             <h2>External Access Login</h2>
-            <p class="lede">External requests are challenged with a TOTP code. Register the email address and scan the QR code from a trusted network only.</p>
+            <p class="lede">External requests are challenged with a TOTP code. Register the email address and scan the QR code from a trusted network or your dedicated unauthenticated edge-backed port only.</p>
         </div>
 
         <div class="control-grid">
@@ -126,7 +126,7 @@ else
         "Save setup validates the executable path immediately so the app fails here instead of later when you press Go.",
         "Default HTTP stream URL is used as the starting value on managed HTTP pages when no saved runtime settings exist yet.",
         "Default RTSP URL is used as the starting value on the RTSP page when no machine-specific setting has been saved yet.",
-        "Authenticator enrollment is only allowed from a trusted network. External access then requires the registered email address plus a current authenticator code.",
+        "Authenticator enrollment is only allowed from a trusted network or a configured unauthenticated port. External access then requires the registered email address plus a current authenticator code.",
         "This data is stored locally on disk in local-settings.json and auth-settings.json and should stay out of source control."
     ];
 
@@ -141,6 +141,7 @@ else
     private string _qrCodeDataUrl = string.Empty;
     private string _manualKey = string.Empty;
     private List<AuthAccountSummary> _accounts = [];
+    private bool HasPrivilegedAccess => _authStatus is { TrustedNetwork: true } || _authStatus is { UnauthenticatedAccess: true };
 
     private bool _loaded;
 
@@ -170,10 +171,10 @@ else
             return;
         }
 
-        if (_authStatus is { TrustedNetwork: false })
+        if (!HasPrivilegedAccess)
         {
-            Settings.AuthEmail = _authStatus.Email ?? string.Empty;
-            StatusText = "Setup is only available from a trusted network.";
+            Settings.AuthEmail = _authStatus?.Email ?? string.Empty;
+            StatusText = "Setup is only available from a trusted network or configured unauthenticated port.";
             return;
         }
 
@@ -210,9 +211,9 @@ else
     {
         ErrorText = string.Empty;
         SuccessText = string.Empty;
-        if (_authStatus is { TrustedNetwork: false })
+        if (!HasPrivilegedAccess)
         {
-            ErrorText = "Setup is only available from a trusted network.";
+            ErrorText = "Setup is only available from a trusted network or configured unauthenticated port.";
             return;
         }
 
@@ -258,9 +259,9 @@ else
         _qrCodeDataUrl = string.Empty;
         _manualKey = string.Empty;
 
-        if (_authStatus is { TrustedNetwork: false })
+        if (!HasPrivilegedAccess)
         {
-            ErrorText = "Authenticator enrollment is only available from a trusted network.";
+            ErrorText = "Authenticator enrollment is only available from a trusted network or configured unauthenticated port.";
             return;
         }
 
@@ -285,7 +286,7 @@ else
         Settings.AuthEmail = enrollment.Email;
         _qrCodeDataUrl = enrollment.QrCodeDataUrl;
         _manualKey = enrollment.ManualKey;
-        _authStatus = new AuthStatusResponse(true, false, true, true, enrollment.Email, enrollment.Email);
+        _authStatus = new AuthStatusResponse(true, false, false, true, true, enrollment.Email, enrollment.Email);
         await LoadAccountsAsync();
         SuccessText = "Authenticator secret saved. Scan the QR code with your authenticator app.";
     }
@@ -301,9 +302,9 @@ else
         ErrorText = string.Empty;
         SuccessText = string.Empty;
 
-        if (_authStatus is { TrustedNetwork: false })
+        if (!HasPrivilegedAccess)
         {
-            ErrorText = "Authenticator management is only available from a trusted network.";
+            ErrorText = "Authenticator management is only available from a trusted network or configured unauthenticated port.";
             return;
         }
 

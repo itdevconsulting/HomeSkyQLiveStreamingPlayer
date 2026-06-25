@@ -8,6 +8,7 @@ Service details:
 - display name: `SkyQ Streaming Service`
 - startup type: automatic
 - default URL: `http://127.0.0.1:5221/`
+- optional unauthenticated URL: disabled by default, for example `http://127.0.0.1:5222/`
 
 Quick install from GitHub:
 
@@ -22,6 +23,14 @@ Local repo install from the repository root on the target Windows machine:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
 ```
+
+Optional second listener with app auth bypassed:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -UnauthenticatedPort 5222
+```
+
+Use that second port only behind your existing edge authentication layer. The normal `-Port` listener keeps the app's built-in authenticator flow.
 
 What it does:
 
@@ -95,6 +104,7 @@ Cloudflare Zero Trust / Tailscale:
 - keep the app private and put Cloudflare Zero Trust or Tailscale in front of it
 - first-time authenticator enrollment must still be done from a trusted local or Tailscale network
 - for Cloudflare, point the private origin or tunnel at `http://127.0.0.1:5221`
+- if you enable `-UnauthenticatedPort`, point your edge at that second port instead and let the edge own authentication
 
 Notes:
 

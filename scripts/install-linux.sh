@@ -12,6 +12,7 @@ SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 DOTNET_ROOT_DIR="${DOTNET_ROOT_DIR:-/usr/share/dotnet}"
 DOTNET_BIN="/usr/bin/dotnet"
 PORT="${PORT:-5221}"
+UNAUTHENTICATED_PORT="${UNAUTHENTICATED_PORT:-}"
 DOTNET_CHANNEL="${DOTNET_CHANNEL:-10.0}"
 DOTNET_QUALITY="${DOTNET_QUALITY:-GA}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -299,6 +300,11 @@ stop_existing_service() {
 }
 
 write_service_unit() {
+    local access_env=""
+    if [[ -n "$UNAUTHENTICATED_PORT" ]]; then
+        access_env="Environment=Access__UnauthenticatedPort=$UNAUTHENTICATED_PORT"
+    fi
+
     cat >"$SERVICE_FILE" <<EOF
 [Unit]
 Description=Home Sky Q Live Streaming Player
@@ -314,6 +320,7 @@ Environment=HOME=$STATE_DIR
 Environment=DOTNET_ROOT=$DOTNET_ROOT_DIR
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=ASPNETCORE_URLS=http://0.0.0.0:$PORT
+${access_env}
 ExecStart=$DOTNET_BIN $APP_DIR/H265Player.dll
 Restart=always
 RestartSec=5
@@ -403,11 +410,22 @@ Useful URLs:
   Setup:      http://127.0.0.1:${PORT}/setup
 EOF
 
+    if [[ -n "$UNAUTHENTICATED_PORT" ]]; then
+        cat <<EOF
+  Edge:       http://127.0.0.1:${UNAUTHENTICATED_PORT}/ (no app auth)
+EOF
+    fi
+
     if [[ -n "$lan_ip" ]]; then
         cat <<EOF
   LAN:        http://${lan_ip}:${PORT}/
   LAN Setup:  http://${lan_ip}:${PORT}/setup
 EOF
+        if [[ -n "$UNAUTHENTICATED_PORT" ]]; then
+            cat <<EOF
+  LAN Edge:   http://${lan_ip}:${UNAUTHENTICATED_PORT}/ (no app auth)
+EOF
+        fi
     fi
 
     if [[ -n "$tailscale_ip" ]]; then
@@ -415,6 +433,11 @@ EOF
   Tailscale:  http://${tailscale_ip}:${PORT}/
   TS Setup:   http://${tailscale_ip}:${PORT}/setup
 EOF
+        if [[ -n "$UNAUTHENTICATED_PORT" ]]; then
+            cat <<EOF
+  TS Edge:    http://${tailscale_ip}:${UNAUTHENTICATED_PORT}/ (no app auth)
+EOF
+        fi
     fi
 
     cat <<'EOF'

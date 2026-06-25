@@ -25,6 +25,7 @@ public sealed record AuthSettings(IReadOnlyList<AuthAccount> Accounts)
 
 public sealed record AuthStatusResponse(
     bool TrustedNetwork,
+    bool UnauthenticatedAccess,
     bool RequiresAuthentication,
     bool IsAuthenticated,
     bool AuthenticatorConfigured,

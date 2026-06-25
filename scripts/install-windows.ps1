@@ -3,6 +3,7 @@ param(
     [string]$InstallRoot = "$env:ProgramData\SkyQStreamingService",
     [string]$DotnetRoot = "${env:ProgramFiles}\dotnet",
     [int]$Port = 5221,
+    [int]$UnauthenticatedPort = 0,
     [string]$DotnetChannel = "10.0",
     [string]$DotnetQuality = "GA",
     [string]$ServiceName = "SkyStreamingService",
@@ -280,7 +281,12 @@ function Create-Service {
         Fail "Published app host not found at $appExe."
     }
 
-    $binaryPath = "`"$appExe`" --urls `"http://0.0.0.0:$Port`""
+    $binaryArguments = @("--urls", "`"http://0.0.0.0:$Port`"")
+    if ($UnauthenticatedPort -gt 0) {
+        $binaryArguments += @("--Access:UnauthenticatedPort", $UnauthenticatedPort)
+    }
+
+    $binaryPath = "`"$appExe`" $($binaryArguments -join ' ')"
     $serviceAccount = "NT AUTHORITY\LocalService"
 
     Write-Log "Creating Windows service $ServiceDisplayName"
@@ -336,9 +342,15 @@ function Print-Summary {
     Write-Host "  Local: http://127.0.0.1:$Port/"
     Write-Host "  Setup: http://127.0.0.1:$Port/setup"
     Write-Host "  Login: http://127.0.0.1:$Port/auth/login"
+    if ($UnauthenticatedPort -gt 0) {
+        Write-Host "  Edge:  http://127.0.0.1:$UnauthenticatedPort/ (no app auth)"
+    }
 
     foreach ($address in $lanAddresses) {
         Write-Host "  LAN:   http://$address`:$Port/"
+        if ($UnauthenticatedPort -gt 0) {
+            Write-Host "  Edge:  http://$address`:$UnauthenticatedPort/ (no app auth)"
+        }
     }
 
     Write-Host ""
