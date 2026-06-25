@@ -77,8 +77,14 @@ ensure_git() {
     have_command git || fail "git is still unavailable after install."
 }
 
+mark_checkout_safe() {
+    git config --global --add safe.directory "$CHECKOUT_DIR" >/dev/null 2>&1 || true
+    git config --system --add safe.directory "$CHECKOUT_DIR" >/dev/null 2>&1 || true
+}
+
 sync_checkout() {
     mkdir -p "$(dirname "$CHECKOUT_DIR")"
+    mark_checkout_safe
 
     if [[ ! -d "$CHECKOUT_DIR/.git" ]]; then
         log "Cloning $REPO_URL"
