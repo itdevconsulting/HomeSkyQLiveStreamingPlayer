@@ -40,6 +40,7 @@ sudo UNAUTHENTICATED_PORT=5222 ./scripts/install-linux.sh
 ```
 
 Use that second port only behind your existing edge authentication layer. The normal `PORT` listener keeps the app's built-in authenticator flow.
+After install, you can also enable, disable, or change that second listener from the app's `Setup` page. Those listener settings are saved in `local-settings.json` and take effect after the service restarts.
 
 What it does:
 

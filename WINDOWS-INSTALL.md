@@ -31,6 +31,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps
 ```
 
 Use that second port only behind your existing edge authentication layer. The normal `-Port` listener keeps the app's built-in authenticator flow.
+After install, you can also enable, disable, or change that second listener from the app's `Setup` page. Those listener settings are saved in `local-settings.json` and take effect after the Windows service restarts.
 
 What it does:
 

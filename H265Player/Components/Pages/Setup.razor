@@ -45,8 +45,31 @@ else
         </label>
     </div>
 
+    <div class="toggle-grid">
+        <label class="check">
+            <input type="checkbox" @bind="Settings.EnableUnauthenticatedPort" />
+            <span>Enable unauthenticated edge-backed port</span>
+        </label>
+    </div>
+
+    <div class="control-grid">
+        <label class="field">
+            <span>Unauthenticated port</span>
+            <input type="number"
+                   @bind="Settings.UnauthenticatedPort"
+                   min="1"
+                   max="65535"
+                   placeholder="5222" />
+        </label>
+    </div>
+
     <div class="toolbar">
         <button type="button" @onclick="SaveAsync">Save setup</button>
+    </div>
+
+    <div class="setup-status missing">
+        <strong>Restart required for listener changes</strong>
+        <span>Changing the unauthenticated listener only takes effect after the installed service restarts. The restart control on the home page restarts the whole service, including both listeners.</span>
     </div>
 
     <div class="setup-auth-grid">
@@ -126,6 +149,8 @@ else
         "Save setup validates the executable path immediately so the app fails here instead of later when you press Go.",
         "Default HTTP stream URL is used as the starting value on managed HTTP pages when no saved runtime settings exist yet.",
         "Default RTSP URL is used as the starting value on the RTSP page when no machine-specific setting has been saved yet.",
+        "The optional unauthenticated port is intended for a private origin sitting behind your own edge auth layer. It bypasses the app's own login completely.",
+        "Listener changes are persisted in local-settings.json and only take effect after the service restarts.",
         "Authenticator enrollment is only allowed from a trusted network or a configured unauthenticated port. External access then requires the registered email address plus a current authenticator code.",
         "This data is stored locally on disk in local-settings.json and auth-settings.json and should stay out of source control."
     ];
@@ -178,14 +203,17 @@ else
             return;
         }
 
-        var setupResponse = await JS.InvokeAsync<ApiEnvelope<LocalSetupSettings>>("h265Auth.fetchJson", "/api/setup");
-        if (setupResponse.Ok && setupResponse.Json is not null)
+        var setupResponse = await JS.InvokeAsync<ApiEnvelope<System.Text.Json.JsonElement>>("h265Auth.fetchJson", "/api/setup");
+        if (setupResponse.Ok && setupResponse.Json.ValueKind is not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null)
         {
+            var parsedSetup = ParseLocalSetupSettings(setupResponse.Json);
             Settings = new SetupForm
             {
-                FfmpegPath = setupResponse.Json.FfmpegPath,
-                DefaultHttpStreamUrl = setupResponse.Json.DefaultHttpStreamUrl,
-                DefaultRtspStreamUrl = setupResponse.Json.DefaultRtspStreamUrl,
+                FfmpegPath = parsedSetup.FfmpegPath,
+                DefaultHttpStreamUrl = parsedSetup.DefaultHttpStreamUrl,
+                DefaultRtspStreamUrl = parsedSetup.DefaultRtspStreamUrl,
+                EnableUnauthenticatedPort = parsedSetup.EnableUnauthenticatedPort,
+                UnauthenticatedPort = parsedSetup.UnauthenticatedPort ?? 5222,
                 AuthEmail = _authStatus?.Email ?? string.Empty
             };
         }
@@ -217,13 +245,17 @@ else
             return;
         }
 
-        var response = await JS.InvokeAsync<ApiEnvelope<LocalSetupSettings>>("h265Auth.fetchJson", "/api/setup", new
+        var response = await JS.InvokeAsync<ApiEnvelope<System.Text.Json.JsonElement>>("h265Auth.fetchJson", "/api/setup", new
         {
             method = "POST",
-            body = System.Text.Json.JsonSerializer.Serialize(new LocalSetupSettings(
-                Settings.FfmpegPath,
-                Settings.DefaultHttpStreamUrl,
-                Settings.DefaultRtspStreamUrl))
+            body = System.Text.Json.JsonSerializer.Serialize(new LocalSetupSettings
+            {
+                FfmpegPath = Settings.FfmpegPath,
+                DefaultHttpStreamUrl = Settings.DefaultHttpStreamUrl,
+                DefaultRtspStreamUrl = Settings.DefaultRtspStreamUrl,
+                EnableUnauthenticatedPort = Settings.EnableUnauthenticatedPort,
+                UnauthenticatedPort = Settings.UnauthenticatedPort
+            })
         });
         if (!response.Ok)
         {
@@ -232,19 +264,22 @@ else
             return;
         }
 
-        if (response.Json is not null)
+        if (response.Json.ValueKind is not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null)
         {
+            var parsedSetup = ParseLocalSetupSettings(response.Json);
             Settings = new SetupForm
             {
-                FfmpegPath = response.Json.FfmpegPath,
-                DefaultHttpStreamUrl = response.Json.DefaultHttpStreamUrl,
-                DefaultRtspStreamUrl = response.Json.DefaultRtspStreamUrl,
+                FfmpegPath = parsedSetup.FfmpegPath,
+                DefaultHttpStreamUrl = parsedSetup.DefaultHttpStreamUrl,
+                DefaultRtspStreamUrl = parsedSetup.DefaultRtspStreamUrl,
+                EnableUnauthenticatedPort = parsedSetup.EnableUnauthenticatedPort,
+                UnauthenticatedPort = parsedSetup.UnauthenticatedPort ?? 5222,
                 AuthEmail = Settings.AuthEmail
             };
         }
 
         StatusText = $"FFmpeg path: {Settings.FfmpegPath}";
-        SuccessText = "Setup saved";
+        SuccessText = "Setup saved. Restart the installed service if you changed the unauthenticated listener settings.";
 
         if (!string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith('/'))
         {
@@ -378,11 +413,19 @@ else
         }
     }
 
+    private static LocalSetupSettings ParseLocalSetupSettings(System.Text.Json.JsonElement json) =>
+        System.Text.Json.JsonSerializer.Deserialize<LocalSetupSettings>(
+            json.GetRawText(),
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+        ?? new LocalSetupSettings();
+
     private sealed class SetupForm
     {
         public string FfmpegPath { get; set; } = string.Empty;
         public string DefaultHttpStreamUrl { get; set; } = string.Empty;
         public string DefaultRtspStreamUrl { get; set; } = string.Empty;
+        public bool EnableUnauthenticatedPort { get; set; }
+        public int? UnauthenticatedPort { get; set; } = 5222;
         public string AuthEmail { get; set; } = string.Empty;
     }
 

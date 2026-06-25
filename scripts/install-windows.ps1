@@ -197,12 +197,31 @@ function Seed-LocalSettings {
     }
 
     $payload = [ordered]@{
-        FfmpegPath          = $FfmpegPath
+        FfmpegPath            = $FfmpegPath
         DefaultHttpStreamUrl = ""
         DefaultRtspStreamUrl = ""
+        EnableUnauthenticatedPort = ($UnauthenticatedPort -gt 0)
+        UnauthenticatedPort = if ($UnauthenticatedPort -gt 0) { $UnauthenticatedPort } else { $null }
     } | ConvertTo-Json
 
     Set-Content -Path $localSettingsPath -Value $payload -Encoding UTF8
+}
+
+function Update-LocalAccessSettings {
+    if ($UnauthenticatedPort -le 0) {
+        return
+    }
+
+    $localSettingsPath = Join-Path $script:AppDir "local-settings.json"
+    if (-not (Test-Path $localSettingsPath)) {
+        return
+    }
+
+    $existing = Get-Content $localSettingsPath -Raw | ConvertFrom-Json
+    $existing.EnableUnauthenticatedPort = $true
+    $existing.UnauthenticatedPort = $UnauthenticatedPort
+    $json = $existing | ConvertTo-Json
+    Set-Content -Path $localSettingsPath -Value $json -Encoding UTF8
 }
 
 function Deploy-App {
@@ -223,6 +242,7 @@ function Deploy-App {
 
     Ensure-Path (Join-Path $script:RuntimeDir "live")
     Seed-LocalSettings -FfmpegPath $FfmpegPath
+    Update-LocalAccessSettings
 }
 
 function Grant-ServiceAccess {
@@ -281,12 +301,7 @@ function Create-Service {
         Fail "Published app host not found at $appExe."
     }
 
-    $binaryArguments = @("--urls", "`"http://0.0.0.0:$Port`"")
-    if ($UnauthenticatedPort -gt 0) {
-        $binaryArguments += @("--Access:UnauthenticatedPort", $UnauthenticatedPort)
-    }
-
-    $binaryPath = "`"$appExe`" $($binaryArguments -join ' ')"
+    $binaryPath = "`"$appExe`" --urls `"http://0.0.0.0:$Port`""
     $serviceAccount = "NT AUTHORITY\LocalService"
 
     Write-Log "Creating Windows service $ServiceDisplayName"

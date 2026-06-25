@@ -34,10 +34,7 @@ public sealed class LocalSetupStore
 
     public async Task SaveAsync(LocalSetupSettings settings, CancellationToken cancellationToken = default)
     {
-        var normalized = new LocalSetupSettings(
-            settings.FfmpegPath.Trim(),
-            settings.DefaultHttpStreamUrl.Trim(),
-            settings.DefaultRtspStreamUrl.Trim());
+        var normalized = Normalize(settings);
 
         lock (_gate)
         {
@@ -52,17 +49,51 @@ public sealed class LocalSetupStore
     {
         if (!File.Exists(_settingsPath))
         {
-            return new LocalSetupSettings(string.Empty, string.Empty, string.Empty);
+            return Empty();
         }
 
         try
         {
             var loaded = JsonSerializer.Deserialize<LocalSetupSettings>(File.ReadAllText(_settingsPath));
-            return loaded ?? new LocalSetupSettings(string.Empty, string.Empty, string.Empty);
+            return loaded is null ? Empty() : Normalize(loaded);
         }
         catch
         {
-            return new LocalSetupSettings(string.Empty, string.Empty, string.Empty);
+            return Empty();
         }
     }
+
+    public static LocalSetupSettings LoadFromPath(string settingsPath)
+    {
+        if (!File.Exists(settingsPath))
+        {
+            return Empty();
+        }
+
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<LocalSetupSettings>(File.ReadAllText(settingsPath));
+            return loaded is null ? Empty() : Normalize(loaded);
+        }
+        catch
+        {
+            return Empty();
+        }
+    }
+
+    private static LocalSetupSettings Normalize(LocalSetupSettings settings) =>
+        new()
+        {
+            FfmpegPath = settings.FfmpegPath.Trim(),
+            DefaultHttpStreamUrl = settings.DefaultHttpStreamUrl.Trim(),
+            DefaultRtspStreamUrl = settings.DefaultRtspStreamUrl.Trim(),
+            EnableUnauthenticatedPort = settings.EnableUnauthenticatedPort,
+            UnauthenticatedPort = NormalizePort(settings.UnauthenticatedPort) ?? 5222
+        };
+
+    private static LocalSetupSettings Empty() =>
+        new();
+
+    private static int? NormalizePort(int? port) =>
+        port is > 0 and <= 65535 ? port : null;
 }

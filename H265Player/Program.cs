@@ -24,11 +24,18 @@ var webApplicationOptions = new WebApplicationOptions
 
 var builder = WebApplication.CreateBuilder(webApplicationOptions);
 builder.WebHost.UseStaticWebAssets();
-var accessOptions = new AccessOptions(NormalizeOptionalPort(builder.Configuration.GetValue<int?>("Access:UnauthenticatedPort")));
+var localSetupPath = Path.Combine(
+    webApplicationOptions.ContentRootPath ?? builder.Environment.ContentRootPath,
+    "local-settings.json");
+var persistedLocalSetup = LocalSetupStore.LoadFromPath(localSetupPath);
+var configuredUnauthenticatedPort = NormalizeOptionalPort(builder.Configuration.GetValue<int?>("Access:UnauthenticatedPort"))
+    ?? NormalizeOptionalPort(persistedLocalSetup.GetEffectiveUnauthenticatedPort());
+var accessOptions = new AccessOptions(configuredUnauthenticatedPort);
 builder.Services.AddSingleton(accessOptions);
 builder.WebHost.ConfigureKestrel((context, options) =>
 {
-    var unauthenticatedPort = NormalizeOptionalPort(context.Configuration.GetValue<int?>("Access:UnauthenticatedPort"));
+    var unauthenticatedPort = NormalizeOptionalPort(context.Configuration.GetValue<int?>("Access:UnauthenticatedPort"))
+        ?? NormalizeOptionalPort(persistedLocalSetup.GetEffectiveUnauthenticatedPort());
     if (unauthenticatedPort is int port)
     {
         options.ListenAnyIP(port);
@@ -280,7 +287,17 @@ static async Task<IResult> SaveLocalSetupAsync(
     try
     {
         var resolved = FfmpegPathResolver.ResolveOrThrow(settings.FfmpegPath.Trim());
-        var normalized = settings with { FfmpegPath = resolved };
+        var normalized = settings with
+        {
+            FfmpegPath = resolved,
+            UnauthenticatedPort = NormalizeOptionalPort(settings.UnauthenticatedPort)
+        };
+        var portValidationError = ValidateUnauthenticatedPort(normalized, httpContext, accessOptions);
+        if (portValidationError is not null)
+        {
+            return portValidationError;
+        }
+
         await ValidateOptionalUrlAsync(normalized.DefaultHttpStreamUrl, cancellationToken);
         await ValidateOptionalUrlAsync(normalized.DefaultRtspStreamUrl, cancellationToken);
         await store.SaveAsync(normalized, cancellationToken);
@@ -548,6 +565,39 @@ static TranscoderSettings ApplyLocalSetup(TranscoderSettings settings, LocalSetu
     return settings with { FfmpegPath = setup.FfmpegPath };
 }
 
+static IResult? ValidateUnauthenticatedPort(LocalSetupSettings settings, HttpContext httpContext, AccessOptions accessOptions)
+{
+    if (!settings.EnableUnauthenticatedPort)
+    {
+        return null;
+    }
+
+    var unauthenticatedPort = NormalizeOptionalPort(settings.UnauthenticatedPort);
+    if (unauthenticatedPort is null)
+    {
+        return Results.BadRequest("Unauthenticated port must be a valid TCP port when enabled.");
+    }
+
+    var currentPorts = httpContext.RequestServices
+        .GetService<IServer>()?
+        .Features
+        .Get<IServerAddressesFeature>()?
+        .Addresses
+        .Select(address => Uri.TryCreate(address, UriKind.Absolute, out var uri) ? uri.Port : (int?)null)
+        .Where(port => port is not null)
+        .Select(port => port!.Value)
+        .Distinct()
+        .ToArray() ?? [];
+
+    if (currentPorts.Contains(unauthenticatedPort.Value) &&
+        unauthenticatedPort != accessOptions.UnauthenticatedPort)
+    {
+        return Results.BadRequest("Unauthenticated port must be different from the app's primary listener port.");
+    }
+
+    return null;
+}
+
 static TranscoderSettings NormalizeSettings(TranscoderSettings settings) =>
     settings with
     {
@@ -610,11 +660,20 @@ static async Task<IResult> ProxyStreamAsync(
     CopyRequestHeaders(context, request);
 
     var client = httpClientFactory.CreateClient("stream-proxy");
-    using var response = await client.SendAsync(
-        request,
-        HttpCompletionOption.ResponseHeadersRead,
-        cancellationToken);
+    HttpResponseMessage response;
+    try
+    {
+        response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.BadRequest($"Upstream stream did not return a valid HTTP response: {ex.Message}");
+    }
 
+    using var _ = response;
     context.Response.StatusCode = (int)response.StatusCode;
     CopyResponseHeaders(context, response);
 
@@ -645,7 +704,17 @@ static async Task<IResult> HlsPlaylistProxyAsync(
     }
 
     var client = httpClientFactory.CreateClient("stream-proxy");
-    using var response = await client.GetAsync(sourceUri, cancellationToken);
+    HttpResponseMessage response;
+    try
+    {
+        response = await client.GetAsync(sourceUri, cancellationToken);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.BadRequest($"Upstream playlist did not return a valid HTTP response: {ex.Message}");
+    }
+
+    using var _ = response;
     if (!response.IsSuccessStatusCode)
     {
         return Results.StatusCode((int)response.StatusCode);

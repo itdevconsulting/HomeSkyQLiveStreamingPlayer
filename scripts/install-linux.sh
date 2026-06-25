@@ -266,7 +266,9 @@ seed_local_settings() {
 {
   "FfmpegPath": "${FFMPEG_PATH}",
   "DefaultHttpStreamUrl": "",
-  "DefaultRtspStreamUrl": ""
+  "DefaultRtspStreamUrl": "",
+  "EnableUnauthenticatedPort": $([[ -n "$UNAUTHENTICATED_PORT" ]] && echo "true" || echo "false"),
+  "UnauthenticatedPort": $([[ -n "$UNAUTHENTICATED_PORT" ]] && echo "$UNAUTHENTICATED_PORT" || echo "null")
 }
 EOF
 }
@@ -300,11 +302,6 @@ stop_existing_service() {
 }
 
 write_service_unit() {
-    local access_env=""
-    if [[ -n "$UNAUTHENTICATED_PORT" ]]; then
-        access_env="Environment=Access__UnauthenticatedPort=$UNAUTHENTICATED_PORT"
-    fi
-
     cat >"$SERVICE_FILE" <<EOF
 [Unit]
 Description=Home Sky Q Live Streaming Player
@@ -320,7 +317,6 @@ Environment=HOME=$STATE_DIR
 Environment=DOTNET_ROOT=$DOTNET_ROOT_DIR
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=ASPNETCORE_URLS=http://0.0.0.0:$PORT
-${access_env}
 ExecStart=$DOTNET_BIN $APP_DIR/H265Player.dll
 Restart=always
 RestartSec=5
