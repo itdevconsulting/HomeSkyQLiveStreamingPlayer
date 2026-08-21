@@ -9,6 +9,7 @@ public sealed record LocalSetupSettings
     public string DefaultRtspStreamUrl { get; init; } = string.Empty;
     public bool EnableUnauthenticatedPort { get; init; }
     public int? UnauthenticatedPort { get; init; } = 5222;
+    public bool AutoUpdateEnabled { get; init; }
 
     [JsonIgnore]
     public bool IsConfigured => !string.IsNullOrWhiteSpace(FfmpegPath);

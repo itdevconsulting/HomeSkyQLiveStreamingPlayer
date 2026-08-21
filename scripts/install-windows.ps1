@@ -202,9 +202,77 @@ function Seed-LocalSettings {
         DefaultRtspStreamUrl = ""
         EnableUnauthenticatedPort = ($UnauthenticatedPort -gt 0)
         UnauthenticatedPort = if ($UnauthenticatedPort -gt 0) { $UnauthenticatedPort } else { $null }
+        AutoUpdateEnabled = $false
     } | ConvertTo-Json
 
     Set-Content -Path $localSettingsPath -Value $payload -Encoding UTF8
+}
+
+function Write-VersionStamp {
+    $sha = ""
+    $builtAt = ""
+    $branch = "main"
+    $repoRoot = Split-Path (Split-Path $script:ProjectFile)
+
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        Push-Location $repoRoot
+        try {
+            $sha = (& git rev-parse HEAD 2>$null | Out-String).Trim()
+            $builtAt = (& git log -1 --format=%cI 2>$null | Out-String).Trim()
+            $branchName = (& git rev-parse --abbrev-ref HEAD 2>$null | Out-String).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($branchName)) {
+                $branch = $branchName
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($sha) -or $sha.Length -lt 7) {
+        try {
+            $headers = @{ "User-Agent" = "HomeSkyQLiveStreamingPlayer-installer" }
+            $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/itdevconsulting/HomeSkyQLiveStreamingPlayer/commits/main" -Headers $headers
+            $sha = [string]$commit.sha
+            $builtAt = [string]$commit.commit.committer.date
+        }
+        catch {
+            $sha = "unknown"
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($builtAt)) {
+        $builtAt = [DateTimeOffset]::UtcNow.ToString("o")
+    }
+
+    $stamp = [ordered]@{
+        commitSha = $sha
+        branch = $branch
+        builtAt = $builtAt
+        repoOwner = "itdevconsulting"
+        repoName = "HomeSkyQLiveStreamingPlayer"
+    } | ConvertTo-Json
+
+    Set-Content -Path (Join-Path $script:PublishTemp "version.json") -Value $stamp -Encoding UTF8
+}
+
+function Install-UpdateHelper {
+    $helperSource = Join-Path $PSScriptRoot "update-if-requested.ps1"
+    $helperDestination = Join-Path $InstallRoot "update-if-requested.ps1"
+    if (-not (Test-Path $helperSource)) {
+        Fail "Update helper was not found at $helperSource."
+    }
+
+    Copy-Item -Path $helperSource -Destination $helperDestination -Force
+
+    $taskName = "SkyQStreamingServiceUpdate"
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$helperDestination`""
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+    $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Trigger $trigger -Force | Out-Null
 }
 
 function Update-LocalAccessSettings {
@@ -351,6 +419,7 @@ function Print-Summary {
     Write-Host "  Install root: $InstallRoot"
     Write-Host "  App directory: $script:AppDir"
     Write-Host "  FFmpeg path:   $(Get-InstalledFfmpegPath)"
+    Write-Host "  Update helper: $(Join-Path $InstallRoot 'update-if-requested.ps1')"
     Write-Host "  Project file:  $script:ProjectFile"
     Write-Host ""
     Write-Host "Useful URLs:"
@@ -390,12 +459,15 @@ try {
         Fail "dotnet publish failed."
     }
 
+    Write-VersionStamp
+
     Stop-ExistingService
 
     Write-Log "Deploying application"
     Deploy-App -FfmpegPath $ffmpegPath
 
     Grant-ServiceAccess
+    Install-UpdateHelper
     Remove-ExistingService
     Create-Service
     Start-ServiceAndWait

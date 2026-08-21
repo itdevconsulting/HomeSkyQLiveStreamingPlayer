@@ -15,9 +15,15 @@
 @if (_isOpen)
 {
     <div id="@PanelId" class="mini-remote" tabindex="0" @onkeydown="OnKeyDownAsync" @onkeydown:preventDefault>
-        <div id="@HandleId" class="mini-remote-handle">
-            <strong>@Title</strong>
-            <button type="button" class="mini-remote-close" @onclick="Close" title="Close remote">
+        <div class="mini-remote-handle">
+            <div id="@HandleId" class="mini-remote-handle-drag">
+                <strong>@Title</strong>
+            </div>
+            <button type="button"
+                    class="mini-remote-close"
+                    @onclick="Close"
+                    @onclick:stopPropagation="true"
+                    title="Close remote">
                 <span class="mini-icon mini-icon-close" aria-hidden="true"></span>
             </button>
         </div>

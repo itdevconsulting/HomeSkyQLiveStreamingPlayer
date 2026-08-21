@@ -62,6 +62,39 @@
         }
     </div>
 
+    @if (_updateStatus is not null)
+    {
+        <div class="setup-service-grid">
+            <div class="panel-copy">
+                <p class="eyebrow">Updates</p>
+                <h2>GitHub Auto-Update</h2>
+                <p class="lede">The installed service can check the public GitHub repo and queue the same installer used for first-time setup. Automatic install is optional and can be turned on from Setup.</p>
+            </div>
+
+            <div class="setup-status @UpdateStatusClass">
+                <strong>@UpdateHeading</strong>
+                <span>@_updateStatus.Message</span>
+                <span class="setup-status-meta">Installed: @FormatVersion(_updateStatus.Current)</span>
+                <span class="setup-status-meta">GitHub: @FormatVersion(_updateStatus.Latest)</span>
+                <span class="setup-status-meta">Auto-update: @(_updateStatus.AutoUpdateEnabled ? "On" : "Off")</span>
+            </div>
+
+            <div class="toolbar">
+                <button type="button" disabled="@_updateBusy" @onclick="CheckForUpdateAsync">@CheckButtonText</button>
+                <button type="button" disabled="@UpdateButtonDisabled" @onclick="ApplyUpdateAsync">@UpdateButtonText</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(UpdateErrorText))
+            {
+                <div class="setup-inline-error">@UpdateErrorText</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(UpdateSuccessText))
+            {
+                <div class="setup-inline-success">@UpdateSuccessText</div>
+            }
+        </div>
+    }
+
     <div class="home-grid">
         <a class="home-card" href="/setup">
             <strong>Setup</strong>
@@ -104,6 +137,8 @@
         "Direct is the simplest raw stream test page for HTTP MPEG-TS input.",
         "Setup configures the local FFmpeg path once for this machine. The managed FFmpeg, RTSP, and managed preset paths depend on it.",
         "Streaming Service exposes a restart control on the home page for installed service deployments that support self-restart.",
+        "GitHub Auto-Update compares this install with the public repo and can queue the Linux or Windows installer to replace the running service.",
+        "Turn on automatic updates from Setup if you want the installed service to apply a newer GitHub commit without clicking Install update.",
         "FFmpeg and RTSP are the managed server-side paths. They use the saved FFmpeg settings and generate browser-friendly HLS output.",
         "HLS is the straightforward browser page for .m3u8 playback with optional proxy rewriting.",
         "Engines is the comparison page for trying different browser player libraries against the same stream.",
@@ -116,6 +151,10 @@
     private bool ShowLogout { get; set; }
     private ServiceRestartStatusResponse? _serviceRestartStatus;
     private bool _serviceRestartBusy;
+    private AppUpdateStatusResponse? _updateStatus;
+    private bool _updateBusy;
+    private string UpdateErrorText { get; set; } = string.Empty;
+    private string UpdateSuccessText { get; set; } = string.Empty;
 
     private bool RestartButtonDisabled =>
         _serviceRestartBusy || _serviceRestartStatus is not { CanSelfRestart: true, RestartScheduled: false };
@@ -133,6 +172,34 @@
             : _serviceRestartStatus?.CanSelfRestart == true
                 ? "Self-restart ready"
                 : "Self-restart unavailable";
+
+    private bool UpdateButtonDisabled =>
+        _updateBusy || _updateStatus is not { CanApply: true, UpdateQueued: false } ||
+        _updateStatus is { UpdateAvailable: false };
+
+    private string CheckButtonText =>
+        _updateBusy ? "Checking..." : "Check for updates";
+
+    private string UpdateButtonText =>
+        _updateStatus?.UpdateQueued == true
+            ? "Update queued"
+            : "Install update";
+
+    private string UpdateHeading =>
+        _updateStatus?.UpdateQueued == true
+            ? "Update queued"
+            : _updateStatus?.UpdateAvailable == true
+                ? "Update available"
+                : _updateStatus?.CanApply == true
+                    ? "Up to date"
+                    : "Helper not installed";
+
+    private string UpdateStatusClass =>
+        _updateStatus is { UpdateQueued: true } or { UpdateAvailable: true }
+            ? "missing"
+            : _updateStatus is { CanApply: true }
+                ? "configured"
+                : "missing";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -173,6 +240,7 @@
         }
 
         await LoadServiceRestartStatusAsync();
+        await LoadUpdateStatusAsync(forceRefresh: false);
         await InvokeAsync(StateHasChanged);
     }
 
@@ -237,6 +305,95 @@
         {
             _serviceRestartBusy = false;
         }
+    }
+
+    private async Task LoadUpdateStatusAsync(bool forceRefresh)
+    {
+        var response = forceRefresh
+            ? await JS.InvokeAsync<ApiEnvelope<AppUpdateStatusResponse>>("h265Auth.fetchJson", "/api/update/check", new { method = "POST" })
+            : await JS.InvokeAsync<ApiEnvelope<AppUpdateStatusResponse>>("h265Auth.fetchJson", "/api/update/status");
+        if (response.Ok && response.Json is not null)
+        {
+            _updateStatus = response.Json;
+            return;
+        }
+
+        if (response.Status == StatusCodes.Status403Forbidden)
+        {
+            return;
+        }
+
+        UpdateErrorText = string.IsNullOrWhiteSpace(response.Text)
+            ? "Unable to load update status."
+            : response.Text;
+    }
+
+    private async Task CheckForUpdateAsync()
+    {
+        UpdateErrorText = string.Empty;
+        UpdateSuccessText = string.Empty;
+        _updateBusy = true;
+        try
+        {
+            await LoadUpdateStatusAsync(forceRefresh: true);
+            if (_updateStatus is not null)
+            {
+                UpdateSuccessText = _updateStatus.Message;
+            }
+        }
+        finally
+        {
+            _updateBusy = false;
+        }
+    }
+
+    private async Task ApplyUpdateAsync()
+    {
+        UpdateErrorText = string.Empty;
+        UpdateSuccessText = string.Empty;
+        if (UpdateButtonDisabled)
+        {
+            return;
+        }
+
+        _updateBusy = true;
+        try
+        {
+            var response = await JS.InvokeAsync<ApiEnvelope<AppUpdateStatusResponse>>("h265Auth.fetchJson", "/api/update/apply", new
+            {
+                method = "POST"
+            });
+
+            if (response.Json is not null)
+            {
+                _updateStatus = response.Json;
+            }
+
+            if (!response.Ok)
+            {
+                UpdateErrorText = response.Json?.Message ?? response.Text;
+                return;
+            }
+
+            UpdateSuccessText = _updateStatus?.Message ?? "Update queued. The page will disconnect while the service is replaced.";
+        }
+        finally
+        {
+            _updateBusy = false;
+        }
+    }
+
+    private static string FormatVersion(AppVersionSummary? version)
+    {
+        if (version is null)
+        {
+            return "Unknown";
+        }
+
+        var stamp = version.Timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "no date";
+        return string.IsNullOrWhiteSpace(version.Message)
+            ? $"{version.ShortSha} ({stamp})"
+            : $"{version.ShortSha} ({stamp}) {version.Message}";
     }
 
     private sealed class ApiEnvelope<T>

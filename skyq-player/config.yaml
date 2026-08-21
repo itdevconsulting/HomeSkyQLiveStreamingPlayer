@@ -1,0 +1,25 @@
+name: Home Sky Q Player
+version: "2026.8.21"
+slug: skyq_player
+description: Watch and control your own Sky Q box from Home Assistant using your local HDMI encoder.
+url: https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+host_network: true
+hassio_api: false
+homeassistant_api: false
+apparmor: false
+webui: http://[HOST]:[PORT:5221]
+panel_icon: mdi:television
+ports:
+  5221/tcp: 5221
+ports_description:
+  5221/tcp: Player web UI. Host networking is required so Sky Q discovery can see the LAN.
+options:
+  port: 5221
+schema:
+  port: port

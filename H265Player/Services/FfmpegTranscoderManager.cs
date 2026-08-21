@@ -27,7 +27,7 @@ public sealed class FfmpegTranscoderManager : IDisposable
         IConfiguration configuration,
         ILogger<FfmpegTranscoderManager> logger)
     {
-        _pidFilePath = Path.Combine(environment.ContentRootPath, "runtime", "ffmpeg.pid");
+        _pidFilePath = AppPaths.Runtime("ffmpeg.pid");
         _logger = logger;
         _watchdogOptions = configuration.GetSection("Transcoder").GetSection("Watchdog").Get<TranscoderWatchdogOptions>() ?? new TranscoderWatchdogOptions();
         TryKillPersistedProcess();

@@ -233,6 +233,11 @@ window.h265App = {
     _altHls: null,
     _altVideoJs: null,
     _streamWatchdogs: {},
+    _watchVideo: {
+        scale: 100,
+        observer: null,
+        resizeHandler: null
+    },
     _hlsState: {
         framework: "Idle",
         status: "Idle",
@@ -878,6 +883,105 @@ window.h265App = {
         });
     },
 
+    getWatchVideoScale() {
+        try {
+            const raw = window.localStorage.getItem("h265player:watch:video-scale");
+            const parsed = Number.parseInt(raw, 10);
+            if (!Number.isNaN(parsed)) {
+                return Math.min(100, Math.max(20, parsed));
+            }
+        } catch {
+        }
+
+        return 100;
+    },
+
+    setWatchVideoScale(scale) {
+        const parsed = Number.parseInt(scale, 10);
+        this._watchVideo.scale = Number.isNaN(parsed) ? 100 : Math.min(100, Math.max(20, parsed));
+        try {
+            window.localStorage.setItem("h265player:watch:video-scale", String(this._watchVideo.scale));
+        } catch {
+        }
+
+        this.applyWatchVideoSize();
+        this.bindWatchVideoSize();
+        return this._watchVideo.scale;
+    },
+
+    applyWatchVideoSize() {
+        window.requestAnimationFrame(() => this._applyWatchVideoSizeNow());
+    },
+
+    _applyWatchVideoSizeNow() {
+        const shell = document.getElementById("preset-video-shell");
+        if (!shell) {
+            return;
+        }
+
+        const panel = shell.closest(".preset-player-panel");
+        const meta = panel?.querySelector(".preset-meta");
+        const panelStyle = panel ? window.getComputedStyle(panel) : null;
+        const padX = panelStyle
+            ? (Number.parseFloat(panelStyle.paddingLeft) || 0) + (Number.parseFloat(panelStyle.paddingRight) || 0)
+            : 0;
+        const contentW = Math.max(240, (panel?.clientWidth || window.innerWidth) - padX);
+        const shellTop = shell.getBoundingClientRect().top;
+        const metaStyle = meta ? window.getComputedStyle(meta) : null;
+        const metaH = meta
+            ? meta.getBoundingClientRect().height + (Number.parseFloat(metaStyle?.marginTop) || 0)
+            : 0;
+        const availH = Math.max(160, window.innerHeight - shellTop - metaH - 8);
+        const scale = (this._watchVideo.scale || 100) / 100;
+        const width = Math.max(240, Math.round(contentW * scale));
+        const height = Math.max(135, Math.round(availH * scale));
+        shell.style.width = `${width}px`;
+        shell.style.height = `${height}px`;
+        shell.style.maxWidth = "100%";
+
+        for (const element of shell.querySelectorAll(".player-host, .video-host")) {
+            const frame = element.closest(".preset-video-frame");
+            if (frame && frame.style.display === "none") {
+                continue;
+            }
+
+            element.style.width = "100%";
+            element.style.height = "100%";
+            element.style.minHeight = "0";
+        }
+
+        this.resizeManagedHost("preset-managed-host");
+    },
+
+    bindWatchVideoSize() {
+        if (this._watchVideo.resizeHandler) {
+            return;
+        }
+
+        this._watchVideo.resizeHandler = () => this.applyWatchVideoSize();
+        window.addEventListener("resize", this._watchVideo.resizeHandler);
+
+        if (typeof ResizeObserver === "undefined") {
+            return;
+        }
+
+        const content = document.querySelector(".content-shell");
+        this._watchVideo.observer = new ResizeObserver(() => this.applyWatchVideoSize());
+        if (content) {
+            this._watchVideo.observer.observe(content);
+        }
+    },
+
+    releaseWatchVideoSize() {
+        if (this._watchVideo.resizeHandler) {
+            window.removeEventListener("resize", this._watchVideo.resizeHandler);
+            this._watchVideo.resizeHandler = null;
+        }
+
+        this._watchVideo.observer?.disconnect?.();
+        this._watchVideo.observer = null;
+    },
+
     enableMiniRemote(panelId, handleId, storageKey) {
         const panel = document.getElementById(panelId);
         const handle = document.getElementById(handleId);
@@ -983,6 +1087,10 @@ window.h265App = {
 
         handle.addEventListener("pointerdown", (event) => {
             if (event.button !== undefined && event.button !== 0) {
+                return;
+            }
+
+            if (event.target instanceof Element && event.target.closest("button")) {
                 return;
             }
 

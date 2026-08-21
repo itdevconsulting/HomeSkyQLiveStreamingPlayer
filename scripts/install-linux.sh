@@ -234,6 +234,48 @@ run_publish() {
     su -s /bin/bash "$BUILD_USER" -c "$command"
 }
 
+write_version_stamp() {
+    local sha=""
+    local built_at=""
+    local branch="main"
+    local tmp
+
+    if [[ -d "$REPO_ROOT/.git" ]] && have_command git; then
+        sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+        built_at="$(git -C "$REPO_ROOT" log -1 --format=%cI 2>/dev/null || true)"
+        branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+    fi
+
+    if [[ -z "$sha" ]]; then
+        tmp="$(mktemp)"
+        if have_command curl; then
+            curl -fsSL -H "User-Agent: HomeSkyQLiveStreamingPlayer-installer" \
+                "https://api.github.com/repos/itdevconsulting/HomeSkyQLiveStreamingPlayer/commits/main" >"$tmp" || true
+        elif have_command wget; then
+            wget -qO "$tmp" --header="User-Agent: HomeSkyQLiveStreamingPlayer-installer" \
+                "https://api.github.com/repos/itdevconsulting/HomeSkyQLiveStreamingPlayer/commits/main" || true
+        fi
+        if [[ -s "$tmp" ]]; then
+            sha="$(sed -n 's/.*"sha": "\([0-9a-f]\{40\}\)".*/\1/p' "$tmp" | head -n 1)"
+            built_at="$(sed -n 's/.*"date": "\([^"]*\)".*/\1/p' "$tmp" | head -n 1)"
+        fi
+        rm -f "$tmp"
+    fi
+
+    [[ -n "$sha" ]] || sha="unknown"
+    [[ -n "$built_at" ]] || built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    cat >"$PUBLISH_TMP/version.json" <<EOF
+{
+  "commitSha": "$sha",
+  "branch": "$branch",
+  "builtAt": "$built_at",
+  "repoOwner": "itdevconsulting",
+  "repoName": "HomeSkyQLiveStreamingPlayer"
+}
+EOF
+}
+
 backup_existing_state() {
     if [[ ! -d "$APP_DIR" ]]; then
         return 0
@@ -268,7 +310,8 @@ seed_local_settings() {
   "DefaultHttpStreamUrl": "",
   "DefaultRtspStreamUrl": "",
   "EnableUnauthenticatedPort": $([[ -n "$UNAUTHENTICATED_PORT" ]] && echo "true" || echo "false"),
-  "UnauthenticatedPort": $([[ -n "$UNAUTHENTICATED_PORT" ]] && echo "$UNAUTHENTICATED_PORT" || echo "null")
+  "UnauthenticatedPort": $([[ -n "$UNAUTHENTICATED_PORT" ]] && echo "$UNAUTHENTICATED_PORT" || echo "null"),
+  "AutoUpdateEnabled": false
 }
 EOF
 }
@@ -337,10 +380,67 @@ WantedBy=multi-user.target
 EOF
 }
 
+write_update_units() {
+    local helper_src="$SCRIPT_DIR/skystreaming-update.sh"
+    local helper_dst="/usr/local/sbin/skystreaming-update"
+    local update_service="/etc/systemd/system/${APP_NAME}-update.service"
+    local update_path="/etc/systemd/system/${APP_NAME}-update.path"
+
+    if [[ -f "$helper_src" ]]; then
+        cp "$helper_src" "$helper_dst"
+    else
+        cat >"$helper_dst" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+FLAG="${UPDATE_FLAG:-/var/lib/skystreamingservice/update.request}"
+CHECKOUT="${CHECKOUT_DIR:-/usr/local/src/homeskyqlivestreamingplayer}"
+LOG="${UPDATE_LOG:-/var/lib/skystreamingservice/update.log}"
+mkdir -p "$(dirname "$LOG")"
+rm -f "$FLAG"
+{
+    echo "[$(date -Is)] Starting GitHub update"
+    if [[ -f "$CHECKOUT/scripts/install-from-github.sh" ]]; then
+        bash "$CHECKOUT/scripts/install-from-github.sh"
+    else
+        curl -fsSL https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/scripts/install-from-github.sh | bash
+    fi
+    echo "[$(date -Is)] GitHub update finished"
+} >>"$LOG" 2>&1
+EOF
+    fi
+    chmod 755 "$helper_dst"
+
+    cat >"$update_service" <<EOF
+[Unit]
+Description=Home Sky Q Live Streaming Player updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=5
+TimeoutStartSec=1800
+ExecStart=$helper_dst
+EOF
+
+    cat >"$update_path" <<EOF
+[Unit]
+Description=Watch for Home Sky Q Live Streaming Player update requests
+
+[Path]
+PathExists=$STATE_DIR/update.request
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
 reload_and_start_service() {
     systemctl daemon-reload
     systemctl enable "$APP_NAME"
+    systemctl enable "${APP_NAME}-update.path"
     systemctl restart "$APP_NAME"
+    systemctl restart "${APP_NAME}-update.path"
 }
 
 detect_primary_ip() {
@@ -379,6 +479,7 @@ Application paths:
   App directory:   ${APP_DIR}
   State directory: ${STATE_DIR}
   Service unit:    ${SERVICE_FILE}
+  Update helper:   /usr/local/sbin/skystreaming-update
   FFmpeg path:     ${FFMPEG_PATH}
 
 Local first-run:
@@ -459,6 +560,7 @@ main() {
 
     log "Publishing application"
     run_publish
+    write_version_stamp
 
     stop_existing_service
 
@@ -467,6 +569,7 @@ main() {
 
     log "Writing systemd unit"
     write_service_unit
+    write_update_units
 
     log "Starting service"
     reload_and_start_service

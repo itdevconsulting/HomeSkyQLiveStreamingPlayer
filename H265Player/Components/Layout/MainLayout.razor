@@ -4,8 +4,8 @@
 
 <div class="@GetShellClass()">
     <NavMenu IsCollapsed="_isSidebarCollapsed" OnToggleCollapse="ToggleSidebarCollapse" />
-    <main class="content-shell">
-        <div @key="_routeKey">
+    <main class="@GetContentClass()">
+        <div class="content-shell-body" @key="_routeKey">
             @Body
         </div>
     </main>
@@ -27,6 +27,31 @@
     }
 
     private string GetShellClass() => _isSidebarCollapsed ? "shell shell-collapsed" : "shell";
+
+    private string GetContentClass()
+    {
+        var classes = "content-shell";
+        if (IsWatchRoute)
+        {
+            classes += " content-shell-watch";
+        }
+
+        if (_isSidebarCollapsed)
+        {
+            classes += " content-shell-collapsed";
+        }
+
+        return classes;
+    }
+
+    private bool IsWatchRoute
+    {
+        get
+        {
+            var path = NavigationManager.ToBaseRelativePath(_routeKey).Trim('/');
+            return path.StartsWith("preset/", StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {

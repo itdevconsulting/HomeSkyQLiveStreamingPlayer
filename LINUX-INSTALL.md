@@ -52,6 +52,7 @@ What it does:
 - stops `SkyStreamingService` before replacing the deployed app
 - fully replaces `/opt/skystreamingservice/app` with the latest published build
 - writes or updates the `SkyStreamingService` systemd service and restarts it
+- installs a root updater helper and a systemd path unit so the app can queue GitHub updates
 - preserves local app state on re-runs:
   - `local-settings.json`
   - `auth-settings.json`
@@ -68,6 +69,7 @@ sudo systemctl start SkyStreamingService
 sudo systemctl stop SkyStreamingService
 sudo systemctl restart SkyStreamingService
 sudo journalctl -u SkyStreamingService -f
+sudo journalctl -u SkyStreamingService-update -n 100 --no-pager
 ```
 
 Uninstall:
@@ -77,7 +79,12 @@ Stop and remove the service only:
 ```bash
 sudo systemctl stop SkyStreamingService
 sudo systemctl disable SkyStreamingService
+sudo systemctl stop SkyStreamingService-update.path
+sudo systemctl disable SkyStreamingService-update.path
 sudo rm -f /etc/systemd/system/SkyStreamingService.service
+sudo rm -f /etc/systemd/system/SkyStreamingService-update.service
+sudo rm -f /etc/systemd/system/SkyStreamingService-update.path
+sudo rm -f /usr/local/sbin/skystreaming-update
 sudo systemctl daemon-reload
 ```
 

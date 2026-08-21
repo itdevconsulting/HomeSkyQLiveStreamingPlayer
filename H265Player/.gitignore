@@ -3,6 +3,7 @@ obj/
 build-verify/
 runtime/
 local-settings.json
+version.json
 auth-settings.json
 transcoder-settings.json
 direct-skyq-presets.json

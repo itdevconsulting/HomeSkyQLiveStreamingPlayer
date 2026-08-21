@@ -81,7 +81,7 @@ public sealed class SkyQService : IDisposable
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
-        _cachePath = Path.Combine(environment.ContentRootPath, "skyq-cache.json");
+        _cachePath = AppPaths.File("skyq-cache.json");
         _cachedScan = LoadCachedScan();
         _lastScanAt = _cachedScan.LastScanAt;
     }

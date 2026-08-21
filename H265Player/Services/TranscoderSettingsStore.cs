@@ -17,7 +17,7 @@ public sealed class TranscoderSettingsStore
         IConfiguration configuration,
         LocalSetupStore localSetupStore)
     {
-        _settingsPath = Path.Combine(environment.ContentRootPath, "transcoder-settings.json");
+        _settingsPath = AppPaths.File("transcoder-settings.json");
         _localSetupStore = localSetupStore;
         _defaults = configuration.GetSection("Transcoder").Get<TranscoderDefaults>() ?? new TranscoderDefaults();
         _settings = LoadSettings();

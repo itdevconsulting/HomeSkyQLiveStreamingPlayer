@@ -12,7 +12,7 @@ public sealed class LocalSetupStore
 
     public LocalSetupStore(IHostEnvironment environment)
     {
-        _settingsPath = Path.Combine(environment.ContentRootPath, "local-settings.json");
+        _settingsPath = AppPaths.File("local-settings.json");
         _settings = Load();
     }
 
@@ -82,17 +82,29 @@ public sealed class LocalSetupStore
     }
 
     private static LocalSetupSettings Normalize(LocalSetupSettings settings) =>
-        new()
+        WithDetectedFfmpeg(new LocalSetupSettings
         {
             FfmpegPath = settings.FfmpegPath.Trim(),
             DefaultHttpStreamUrl = settings.DefaultHttpStreamUrl.Trim(),
             DefaultRtspStreamUrl = settings.DefaultRtspStreamUrl.Trim(),
             EnableUnauthenticatedPort = settings.EnableUnauthenticatedPort,
-            UnauthenticatedPort = NormalizePort(settings.UnauthenticatedPort) ?? 5222
-        };
+            UnauthenticatedPort = NormalizePort(settings.UnauthenticatedPort) ?? 5222,
+            AutoUpdateEnabled = settings.AutoUpdateEnabled
+        });
 
     private static LocalSetupSettings Empty() =>
-        new();
+        WithDetectedFfmpeg(new LocalSetupSettings());
+
+    private static LocalSetupSettings WithDetectedFfmpeg(LocalSetupSettings settings)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.FfmpegPath) || !AppPaths.IsContainer)
+        {
+            return settings;
+        }
+
+        var detected = FfmpegPathResolver.TryDetect();
+        return detected is null ? settings : settings with { FfmpegPath = detected };
+    }
 
     private static int? NormalizePort(int? port) =>
         port is > 0 and <= 65535 ? port : null;

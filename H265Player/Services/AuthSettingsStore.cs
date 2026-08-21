@@ -14,7 +14,7 @@ public sealed class AuthSettingsStore
 
     public AuthSettingsStore(IHostEnvironment environment, IDataProtectionProvider dataProtectionProvider)
     {
-        _path = Path.Combine(environment.ContentRootPath, "auth-settings.json");
+        _path = AppPaths.File("auth-settings.json");
         _protector = dataProtectionProvider.CreateProtector("H265Player.AuthSettings.v1");
         _settings = Load();
     }

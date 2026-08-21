@@ -17,6 +17,8 @@ This project is designed for self-hosted home setups where a Sky Q box is connec
 - 🔒 Authenticator-based external access with trusted local setup
 - 🐧 Self-hosted deployment with Linux install scripts for updates and re-runs
 - 🪟 Windows PowerShell installer with Windows Service deployment
+- 🐳 Docker image and Home Assistant add-on, with FFmpeg included
+- 🔄 In-app GitHub update checks, with optional automatic install on the installed service
 
 ## 🧠 How It Works
 
@@ -90,6 +92,20 @@ Detailed Windows deployment notes are in [WINDOWS-INSTALL.md](WINDOWS-INSTALL.md
 
 Windows uninstall details are also covered there, including service-only removal and full cleanup commands.
 
+## 🐳 Docker / Home Assistant
+
+Run the player as a container when you want it next to Home Assistant instead of as a systemd or Windows service.
+
+```bash
+docker compose up -d --build
+```
+
+On Home Assistant OS or Supervised, add this GitHub repository as a custom add-on store and install **Home Sky Q Player**.
+
+The container includes FFmpeg, keeps settings in `/data`, and uses host networking so Sky Q discovery still works on your LAN.
+
+Full Docker and Home Assistant notes are in [DOCKER.md](DOCKER.md).
+
 ## 📦 What It Does
 
 - discovers Sky Q boxes on the local private network
@@ -117,6 +133,7 @@ The bootstrap installer:
 - fully replaces `/opt/skystreamingservice/app` with the latest published build
 - writes or updates the `SkyStreamingService` systemd service and restarts it
 - preserves local runtime state across upgrades
+- registers a root updater helper so the app can pull a newer GitHub commit
 
 ## 🛠️ Windows Installer Summary
 
@@ -129,6 +146,7 @@ The Windows installer:
 - recreates and restarts the `SkyStreamingService` Windows service
 - deploys the published app to `C:\ProgramData\SkyQStreamingService\app`
 - preserves `local-settings.json`, `auth-settings.json`, `transcoder-settings.json`, `direct-skyq-presets.json`, `skyq-cache.json`, and `runtime\` on re-runs
+- registers a SYSTEM scheduled task so the app can pull a newer GitHub commit
 
 Uninstall guidance:
 
@@ -148,6 +166,7 @@ From there:
 3. Enter the email address to enroll for remote access.
 4. Generate and scan the authenticator QR code.
 5. External users then sign in at `/auth/login`.
+6. From the home page on a trusted network, use **Check for updates** / **Install update**, or turn on automatic GitHub updates in Setup.
 
 ## 📝 Notes
 

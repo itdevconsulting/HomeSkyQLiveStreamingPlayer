@@ -40,6 +40,7 @@ What it does:
 - publishes the app in `Release`
 - stops and recreates the Windows service on re-runs
 - fully replaces `C:\ProgramData\SkyQStreamingService\app` with the latest published build
+- installs a SYSTEM scheduled task so the app can queue GitHub updates
 - preserves local app state on re-runs:
   - `local-settings.json`
   - `auth-settings.json`
@@ -63,6 +64,7 @@ Get-Service SkyStreamingService
 Start-Service SkyStreamingService
 Stop-Service SkyStreamingService
 Restart-Service SkyStreamingService
+Get-ScheduledTask SkyQStreamingServiceUpdate
 ```
 
 Uninstall:
@@ -72,6 +74,7 @@ Stop and remove the service only:
 ```powershell
 Stop-Service SkyStreamingService -ErrorAction SilentlyContinue
 sc.exe delete SkyStreamingService
+Unregister-ScheduledTask -TaskName SkyQStreamingServiceUpdate -Confirm:$false -ErrorAction SilentlyContinue
 ```
 
 Remove the deployed app, FFmpeg copy, and local runtime state as well:

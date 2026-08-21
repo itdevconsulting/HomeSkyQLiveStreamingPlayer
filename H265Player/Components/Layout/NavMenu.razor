@@ -5,10 +5,13 @@
 
 <aside class="@GetNavShellClass()">
     <div class="nav-header">
-        <div class="brand">
-            <span class="brand-kicker">Blazor Server</span>
-            <strong class="brand-title">@GetBrandTitle()</strong>
-        </div>
+        @if (!IsCollapsed)
+        {
+            <div class="brand">
+                <span class="brand-kicker">Blazor Server</span>
+                <strong class="brand-title">H265 Player</strong>
+            </div>
+        }
 
         <div class="nav-header-actions">
             <a class="nav-header-link"
@@ -58,18 +61,19 @@
                     <span class="@GetChevronClass(_playersExpanded)" aria-hidden="true"></span>
                 </button>
 
-                <div class="@GetPlayersSubLinksClass()">
-                    <NavLink class="nav-link-sub" href="/direct">Direct</NavLink>
-                    <NavLink class="nav-link-sub" href="/ffmpeg">FFmpeg</NavLink>
-                    <NavLink class="nav-link-sub" href="/rtsp">RTSP</NavLink>
-                    <NavLink class="nav-link-sub" href="/hls">HLS</NavLink>
-                    <NavLink class="nav-link-sub" href="/engines">Engines</NavLink>
-                </div>
-
-                @if (IsCollapsed)
+                @if (!IsCollapsed)
                 {
-                    <div class="@GetPlayersFlyoutClass()">
-                        <span class="brand-kicker nav-flyout-kicker">Players</span>
+                    <div class="@GetPlayersSubLinksClass()">
+                        <NavLink class="nav-link-sub" href="/direct">Direct</NavLink>
+                        <NavLink class="nav-link-sub" href="/ffmpeg">FFmpeg</NavLink>
+                        <NavLink class="nav-link-sub" href="/rtsp">RTSP</NavLink>
+                        <NavLink class="nav-link-sub" href="/hls">HLS</NavLink>
+                        <NavLink class="nav-link-sub" href="/engines">Engines</NavLink>
+                    </div>
+                }
+                else if (_playersFlyoutOpen)
+                {
+                    <div class="nav-flyout nav-flyout-open">
                         <NavLink class="nav-link-sub" href="/direct">Direct</NavLink>
                         <NavLink class="nav-link-sub" href="/ffmpeg">FFmpeg</NavLink>
                         <NavLink class="nav-link-sub" href="/rtsp">RTSP</NavLink>
@@ -250,8 +254,6 @@
 
     private string GetNavShellClass() => IsCollapsed ? "nav-shell nav-shell-collapsed" : "nav-shell";
 
-    private string GetBrandTitle() => IsCollapsed ? "H265" : "H265 Player";
-
     private string GetSidebarToggleLabel() => IsCollapsed ? "Expand sidebar" : "Collapse sidebar";
 
     private string GetSidebarToggleIconClass() =>
@@ -272,9 +274,6 @@
 
     private string GetPlayersSubLinksClass() =>
         _playersExpanded ? "nav-sub-links" : "nav-sub-links nav-sub-links-collapsed";
-
-    private string GetPlayersFlyoutClass() =>
-        _playersFlyoutOpen ? "nav-flyout nav-flyout-open" : "nav-flyout";
 
     private string GetPresetsNavClass()
     {

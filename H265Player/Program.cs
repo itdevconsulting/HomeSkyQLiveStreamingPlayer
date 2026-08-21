@@ -8,6 +8,7 @@ using H265Player.Models;
 using H265Player.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -24,9 +25,8 @@ var webApplicationOptions = new WebApplicationOptions
 
 var builder = WebApplication.CreateBuilder(webApplicationOptions);
 builder.WebHost.UseStaticWebAssets();
-var localSetupPath = Path.Combine(
-    webApplicationOptions.ContentRootPath ?? builder.Environment.ContentRootPath,
-    "local-settings.json");
+AppPaths.Initialize(builder.Environment.ContentRootPath);
+var localSetupPath = AppPaths.File("local-settings.json");
 var persistedLocalSetup = LocalSetupStore.LoadFromPath(localSetupPath);
 var configuredUnauthenticatedPort = NormalizeOptionalPort(builder.Configuration.GetValue<int?>("Access:UnauthenticatedPort"))
     ?? NormalizeOptionalPort(persistedLocalSetup.GetEffectiveUnauthenticatedPort());
@@ -69,12 +69,15 @@ builder.Services.AddHttpClient("skyq")
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(AppPaths.KeysDirectory))
+    .SetApplicationName("HomeSkyQLiveStreamingPlayer");
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
         options.Cookie.Name = "H265Player.Auth";
         options.Cookie.HttpOnly = true;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.IsEssential = true;
         options.LoginPath = "/auth/login";
@@ -110,6 +113,13 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 builder.Services.Configure<TranscoderDefaults>(builder.Configuration.GetSection("Transcoder"));
+builder.Services.AddHttpClient("github", client =>
+{
+    client.BaseAddress = new Uri("https://api.github.com/");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("HomeSkyQLiveStreamingPlayer");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 builder.Services.AddSingleton<TrustedNetworkService>();
 builder.Services.AddSingleton<AuthSettingsStore>();
 builder.Services.AddSingleton<AuthenticatorService>();
@@ -117,9 +127,11 @@ builder.Services.AddSingleton<LocalSetupStore>();
 builder.Services.AddSingleton<TranscoderSettingsStore>();
 builder.Services.AddSingleton<FfmpegTranscoderManager>();
 builder.Services.AddSingleton<ServiceRestartCoordinator>();
+builder.Services.AddSingleton<AppUpdateService>();
 builder.Services.AddSingleton<SkyQService>();
 builder.Services.AddSingleton<DirectSkyQPresetStore>();
 builder.Services.AddHostedService<SkyQRefreshService>();
+builder.Services.AddHostedService<AppUpdateBackgroundService>();
 
 var app = builder.Build();
 var mediaTypes = CreateContentTypeProvider();
@@ -141,12 +153,11 @@ app.Lifetime.ApplicationStarted.Register(() =>
     }
 });
 
-if (!app.Environment.IsDevelopment())
+if (!app.Environment.IsDevelopment() && HasHttpsUrl())
 {
     app.UseHsts();
+    app.UseHttpsRedirection();
 }
-
-app.UseHttpsRedirection();
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
@@ -197,6 +208,9 @@ app.MapGet("/api/setup", (LocalSetupStore store) => Results.Ok(store.Get()));
 app.MapPost("/api/setup", SaveLocalSetupAsync);
 app.MapGet("/api/service/status", GetServiceRestartStatusAsync);
 app.MapPost("/api/service/restart", RestartServiceAsync);
+app.MapGet("/api/update/status", GetAppUpdateStatusAsync);
+app.MapPost("/api/update/check", CheckAppUpdateAsync);
+app.MapPost("/api/update/apply", ApplyAppUpdateAsync);
 app.MapGet("/api/settings", (TranscoderSettingsStore store) => Results.Ok(store.Get()));
 app.MapPost("/api/settings", SaveSettingsAsync);
 app.MapGet("/api/transcoder/status", (FfmpegTranscoderManager manager) => Results.Ok(manager.GetStatus()));
@@ -247,7 +261,7 @@ static async Task<IResult> StartTranscoderAsync(
 
     await store.SaveAsync(settings, cancellationToken);
 
-    var outputDirectory = Path.Combine(environment.ContentRootPath, "runtime", "live");
+    var outputDirectory = AppPaths.Runtime("live");
     Directory.CreateDirectory(outputDirectory);
 
     try
@@ -340,6 +354,54 @@ static IResult RestartServiceAsync(
 
     var status = restartCoordinator.ScheduleRestart();
     return status.CanSelfRestart
+        ? Results.Ok(status)
+        : Results.Json(status, statusCode: StatusCodes.Status409Conflict);
+}
+
+static async Task<IResult> GetAppUpdateStatusAsync(
+    HttpContext httpContext,
+    TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
+    AppUpdateService updateService,
+    CancellationToken cancellationToken)
+{
+    if (!HasPrivilegedAccess(httpContext, trustedNetworkService, accessOptions))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    return Results.Ok(await updateService.GetStatusAsync(forceRefresh: false, cancellationToken));
+}
+
+static async Task<IResult> CheckAppUpdateAsync(
+    HttpContext httpContext,
+    TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
+    AppUpdateService updateService,
+    CancellationToken cancellationToken)
+{
+    if (!HasPrivilegedAccess(httpContext, trustedNetworkService, accessOptions))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    return Results.Ok(await updateService.GetStatusAsync(forceRefresh: true, cancellationToken));
+}
+
+static async Task<IResult> ApplyAppUpdateAsync(
+    HttpContext httpContext,
+    TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
+    AppUpdateService updateService,
+    CancellationToken cancellationToken)
+{
+    if (!HasPrivilegedAccess(httpContext, trustedNetworkService, accessOptions))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var status = await updateService.RequestUpdateAsync(cancellationToken);
+    return status.CanApply && status.UpdateQueued
         ? Results.Ok(status)
         : Results.Json(status, statusCode: StatusCodes.Status409Conflict);
 }
@@ -737,7 +799,7 @@ static Task<IResult> ServeLiveAssetAsync(
         return Task.FromResult<IResult>(Results.BadRequest("Invalid path."));
     }
 
-    var liveRoot = Path.Combine(environment.ContentRootPath, "runtime", "live");
+    var liveRoot = AppPaths.Runtime("live");
     var fullPath = Path.Combine(liveRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
     if (!File.Exists(fullPath))
     {
@@ -914,6 +976,13 @@ static bool IsAppCookieName(string cookieName) =>
     cookieName.Equals("H265Player.Auth", StringComparison.OrdinalIgnoreCase) ||
     cookieName.StartsWith("H265Player.", StringComparison.OrdinalIgnoreCase) ||
     cookieName.StartsWith(".AspNetCore.Antiforgery.", StringComparison.OrdinalIgnoreCase);
+
+static bool HasHttpsUrl()
+{
+    var urls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+    return !string.IsNullOrWhiteSpace(urls) &&
+           urls.Contains("https://", StringComparison.OrdinalIgnoreCase);
+}
 
 static bool HasPrivilegedAccess(HttpContext context, TrustedNetworkService trustedNetworkService, AccessOptions accessOptions) =>
     accessOptions.IsUnauthenticatedEndpoint(context) || trustedNetworkService.IsTrustedRequest(context);

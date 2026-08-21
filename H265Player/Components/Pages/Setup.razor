@@ -50,6 +50,10 @@ else
             <input type="checkbox" @bind="Settings.EnableUnauthenticatedPort" />
             <span>Enable unauthenticated edge-backed port</span>
         </label>
+        <label class="check">
+            <input type="checkbox" @bind="Settings.AutoUpdateEnabled" />
+            <span>Automatically install GitHub updates</span>
+        </label>
     </div>
 
     <div class="control-grid">
@@ -150,6 +154,7 @@ else
         "Default HTTP stream URL is used as the starting value on managed HTTP pages when no saved runtime settings exist yet.",
         "Default RTSP URL is used as the starting value on the RTSP page when no machine-specific setting has been saved yet.",
         "The optional unauthenticated port is intended for a private origin sitting behind your own edge auth layer. It bypasses the app's own login completely.",
+        "Automatically install GitHub updates queues the same Linux or Windows installer when Home finds a newer commit. Leave this off if you want to approve each update from the home page.",
         "Listener changes are persisted in local-settings.json and only take effect after the service restarts.",
         "Authenticator enrollment is only allowed from a trusted network or a configured unauthenticated port. External access then requires the registered email address plus a current authenticator code.",
         "This data is stored locally on disk in local-settings.json and auth-settings.json and should stay out of source control."
@@ -214,6 +219,7 @@ else
                 DefaultRtspStreamUrl = parsedSetup.DefaultRtspStreamUrl,
                 EnableUnauthenticatedPort = parsedSetup.EnableUnauthenticatedPort,
                 UnauthenticatedPort = parsedSetup.UnauthenticatedPort ?? 5222,
+                AutoUpdateEnabled = parsedSetup.AutoUpdateEnabled,
                 AuthEmail = _authStatus?.Email ?? string.Empty
             };
         }
@@ -254,7 +260,8 @@ else
                 DefaultHttpStreamUrl = Settings.DefaultHttpStreamUrl,
                 DefaultRtspStreamUrl = Settings.DefaultRtspStreamUrl,
                 EnableUnauthenticatedPort = Settings.EnableUnauthenticatedPort,
-                UnauthenticatedPort = Settings.UnauthenticatedPort
+                UnauthenticatedPort = Settings.UnauthenticatedPort,
+                AutoUpdateEnabled = Settings.AutoUpdateEnabled
             })
         });
         if (!response.Ok)
@@ -274,6 +281,7 @@ else
                 DefaultRtspStreamUrl = parsedSetup.DefaultRtspStreamUrl,
                 EnableUnauthenticatedPort = parsedSetup.EnableUnauthenticatedPort,
                 UnauthenticatedPort = parsedSetup.UnauthenticatedPort ?? 5222,
+                AutoUpdateEnabled = parsedSetup.AutoUpdateEnabled,
                 AuthEmail = Settings.AuthEmail
             };
         }
@@ -426,6 +434,7 @@ else
         public string DefaultRtspStreamUrl { get; set; } = string.Empty;
         public bool EnableUnauthenticatedPort { get; set; }
         public int? UnauthenticatedPort { get; set; } = 5222;
+        public bool AutoUpdateEnabled { get; set; }
         public string AuthEmail { get; set; } = string.Empty;
     }
 

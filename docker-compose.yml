@@ -1,0 +1,20 @@
+services:
+  skyq-player:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-local}
+        GIT_BRANCH: ${GIT_BRANCH:-main}
+    image: homeskyq-livestreamingplayer:local
+    container_name: skyq-player
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SKYQ_DATA_DIR: /data
+      ASPNETCORE_URLS: http://0.0.0.0:5221
+      ASPNETCORE_ENVIRONMENT: Production
+    volumes:
+      - skyq-data:/data
+
+volumes:
+  skyq-data:

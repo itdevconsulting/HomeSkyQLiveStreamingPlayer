@@ -12,7 +12,7 @@ public sealed class DirectSkyQPresetStore
 
     public DirectSkyQPresetStore(IHostEnvironment environment)
     {
-        _path = Path.Combine(environment.ContentRootPath, "direct-skyq-presets.json");
+        _path = AppPaths.File("direct-skyq-presets.json");
         _presets = Load();
     }
 

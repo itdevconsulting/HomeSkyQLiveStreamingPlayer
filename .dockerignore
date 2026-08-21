@@ -1,0 +1,21 @@
+# Build context
+**/.git
+**/.idea
+**/.vs
+**/bin
+**/obj
+**/runtime
+**/*.user
+**/*.suo
+**/*.log
+**/TestResults
+**/artifacts
+**/publish
+**/out
+**/.DS_Store
+H265Player/local-settings.json
+H265Player/auth-settings.json
+H265Player/transcoder-settings.json
+H265Player/direct-skyq-presets.json
+H265Player/skyq-cache.json
+H265Player/version.json

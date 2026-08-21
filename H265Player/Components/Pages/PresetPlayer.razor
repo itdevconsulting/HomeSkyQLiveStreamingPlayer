@@ -18,6 +18,7 @@
 }
 else
 {
+    <div class="watch-layout">
     <section class="panel preset-panel">
         <div class="preset-header">
             <div class="preset-header-toolbar">
@@ -34,18 +35,6 @@ else
                         </ButtonContent>
                     </SkyQMiniRemote>
                 </div>
-
-                <div class="preset-icon-group">
-                    <button type="button" class="@GetSizeButtonClass("small")" @onclick="SetSmallVideo" title="Small video">
-                        <span class="size-icon size-icon-small" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" class="@GetSizeButtonClass("medium")" @onclick="SetMediumVideo" title="Medium video">
-                        <span class="size-icon size-icon-medium" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" class="@GetSizeButtonClass("large")" @onclick="SetLargeVideo" title="Large video">
-                        <span class="size-icon size-icon-large" aria-hidden="true"></span>
-                    </button>
-                </div>
             </div>
 
             <label class="@GetBufferingControlClass()" title="@BufferingTitle">
@@ -61,6 +50,19 @@ else
                        @oninput="OnBufferingInput"
                        @onchange="OnBufferingCommittedAsync" />
                 <span class="preset-buffer-value">@_bufferingLevel</span>
+            </label>
+
+            <label class="preset-buffer-control" title="@VideoSizeTitle">
+                <span class="preset-buffer-label">Size</span>
+                <input type="range"
+                       class="preset-buffer-slider preset-size-slider"
+                       min="20"
+                       max="100"
+                       step="1"
+                       value="@_videoScale"
+                       style="@GetVideoSizeSliderStyle()"
+                       @oninput="OnVideoSizeInputAsync" />
+                <span class="preset-size-value">@VideoSizeLabel</span>
             </label>
 
             <div class="preset-header-main">
@@ -86,11 +88,11 @@ else
     else
     {
     <section class="player-panel preset-player-panel">
-        <div class="preset-video-shell @($"preset-video-{_videoSize}")">
-            <div style="@ManagedHostStyle">
+        <div id="preset-video-shell" class="preset-video-shell">
+            <div class="preset-video-frame" style="@ManagedHostStyle">
                 <StaticDomHost Id="preset-managed-host" CssClass="player-host" />
             </div>
-            <div style="@VideoHostStyle">
+            <div class="preset-video-frame" style="@VideoHostStyle">
                 <StaticDomHost Id="preset-player-host" Kind="video" CssClass="video-host" Controls="true" PlaysInline="true" />
             </div>
         </div>
@@ -103,6 +105,7 @@ else
         </div>
     </section>
     }
+    </div>
 }
 
 @code {
@@ -114,6 +117,7 @@ else
         "Go tears down any existing player on this screen and starts the saved source again using its configured source type.",
         "Direct presets use the raw TS browser path, HLS presets use the HLS browser path, and FFmpeg or RTSP presets restart the managed transcoder before playing the output.",
         "Buffer sets one of five browser buffering presets for Direct and HLS playback. Higher values trade latency for stability.",
+        "Size scales the picture from a small window up to Fit, which uses the remaining space beside the sidebar.",
         "Remote opens a draggable mini Sky Q remote tied to the saved box for this preset.",
         "When the remote is open and focused, number keys send digits, cursor keys navigate, Enter selects, and Space sends pause.",
         "Edit names, stream URLs, or box associations on the Presets page."
@@ -123,7 +127,7 @@ else
     private string _status = "Idle";
     private string _logText = string.Empty;
     private string _lastCommand = "None";
-    private string _videoSize = "medium";
+    private int _videoScale = 100;
     private int _bufferingLevel = 5;
     private bool _bufferingDirty;
     private bool _hasLoadedPlayer;
@@ -155,6 +159,11 @@ else
         SupportsAdjustableBuffering
             ? $"Buffering {BufferingLabel} ({_bufferingLevel}/5)"
             : $"Buffering {BufferingLabel} ({_bufferingLevel}/5). Applies to Direct and HLS presets.";
+    private string VideoSizeLabel => _videoScale >= 100 ? "Fit" : $"{_videoScale}%";
+    private string VideoSizeTitle =>
+        _videoScale >= 100
+            ? "Video size Fit. Uses the remaining window space."
+            : $"Video size {_videoScale}% of the remaining window space.";
 
     protected override void OnParametersSet()
     {
@@ -165,6 +174,21 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            try
+            {
+                _videoScale = await JS.InvokeAsync<int>("h265App.getWatchVideoScale");
+            }
+            catch
+            {
+                _videoScale = 100;
+            }
+
+            await ApplyVideoSizeAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+
         if (_preset is null || !_pendingAutoLoad || RequiresSetup)
         {
             return;
@@ -215,6 +239,7 @@ else
         }
 
         await InvokeAsync(StateHasChanged);
+        await ApplyVideoSizeAsync();
     }
 
     private async Task StartManagedPresetAsync()
@@ -285,24 +310,33 @@ else
         NavigationManager.NavigateTo($"/setup?returnUrl={Uri.EscapeDataString($"/preset/{Id}")}");
     }
 
-    private void SetVideoSize(string size)
-    {
-        _videoSize = size;
-    }
-
-    private void SetSmallVideo() => SetVideoSize("small");
-
-    private void SetMediumVideo() => SetVideoSize("medium");
-
-    private void SetLargeVideo() => SetVideoSize("large");
-
-    private string GetSizeButtonClass(string size) =>
-        _videoSize == size ? "preset-icon-button preset-size-button active" : "preset-icon-button preset-size-button";
-
     private string GetBufferingControlClass() =>
         SupportsAdjustableBuffering ? "preset-buffer-control" : "preset-buffer-control preset-buffer-control-disabled";
 
     private string GetBufferingSliderStyle() => $"--buffer-fill:{(_bufferingLevel - 1) * 25}%;";
+
+    private string GetVideoSizeSliderStyle() => $"--buffer-fill:{(_videoScale - 20) / 0.8}%;";
+
+    private async Task OnVideoSizeInputAsync(ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out var parsed))
+        {
+            return;
+        }
+
+        var normalized = Math.Clamp(parsed, 20, 100);
+        if (normalized == _videoScale)
+        {
+            await ApplyVideoSizeAsync();
+            return;
+        }
+
+        _videoScale = normalized;
+        await ApplyVideoSizeAsync();
+    }
+
+    private Task ApplyVideoSizeAsync() =>
+        JS.InvokeVoidAsync("h265App.setWatchVideoScale", _videoScale).AsTask();
 
     private void OnBufferingInput(ChangeEventArgs args)
     {
@@ -406,6 +440,13 @@ else
     public void Dispose()
     {
         _dotNetRef?.Dispose();
+        try
+        {
+            _ = JS.InvokeVoidAsync("h265App.releaseWatchVideoSize");
+        }
+        catch
+        {
+        }
     }
 
     private sealed class DirectLoadResult

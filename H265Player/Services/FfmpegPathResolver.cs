@@ -40,5 +40,27 @@ public static class FfmpegPathResolver
 
         throw new FileNotFoundException("FFmpeg executable was not found. Enter a full path to ffmpeg.exe.", ffmpegPath);
     }
+
+    public static string? TryDetect()
+    {
+        foreach (var candidate in new[]
+                 {
+                     "/usr/bin/ffmpeg",
+                     "/usr/local/bin/ffmpeg",
+                     "ffmpeg",
+                     "ffmpeg.exe"
+                 })
+        {
+            try
+            {
+                return ResolveOrThrow(candidate);
+            }
+            catch (FileNotFoundException)
+            {
+            }
+        }
+
+        return null;
+    }
 }
 
