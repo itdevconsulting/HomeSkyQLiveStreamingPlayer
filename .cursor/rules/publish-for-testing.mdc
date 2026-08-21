@@ -1,0 +1,29 @@
+---
+description: Always commit and push finished work to GitHub so the installed player can be tested
+alwaysApply: true
+---
+
+# Publish so the installed app can be tested
+
+This project is tested on the installed Linux/Windows service (and Docker/HA), not by leaving files only in the local workspace. The live box pulls from GitHub `main`.
+
+When you finish a change the user needs to see or test:
+
+1. Commit it.
+2. Push it to `origin/main` in the same turn. Do not wait to be asked.
+3. Tell the user the commit SHA and how to pick it up.
+
+How they pick it up:
+
+- Existing service with the update helper: Home → Check for updates → Install update, then hard-refresh.
+- First time, or helper missing: re-run the GitHub installer, then hard-refresh.
+
+Do not:
+
+- Leave testable UI/install/player changes unpushed.
+- Tell the user to hard-refresh a machine that still has the old GitHub build.
+- Stop at "I have not committed" after work they cannot otherwise try.
+
+This overrides the default "do not push unless asked" habit for this repo. If push is blocked (auth, `workflow` scope, etc.), fix that or push without the blocked file and say so immediately.
+
+Secrets, `.idea/`, and machine-local settings files still stay out of git.
