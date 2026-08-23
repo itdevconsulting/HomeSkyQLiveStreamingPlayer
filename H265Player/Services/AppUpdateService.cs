@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using H265Player.Models;
+using H265Player;
 
 namespace H265Player.Services;
 
@@ -206,7 +207,10 @@ public sealed class AppUpdateService
         var path = Path.Combine(_environment.ContentRootPath, "version.json");
         if (!File.Exists(path))
         {
-            return null;
+            var fileVersion = AppRelease.ReadVersionFile(_environment.ContentRootPath);
+            return fileVersion is null
+                ? null
+                : ToSummary("local", DateTimeOffset.Now, null, fileVersion);
         }
 
         try
@@ -217,7 +221,11 @@ public sealed class AppUpdateService
                 return null;
             }
 
-            return ToSummary(stamp.CommitSha, stamp.BuiltAt, null);
+            return ToSummary(
+                stamp.CommitSha,
+                stamp.BuiltAt,
+                null,
+                AppRelease.Normalize(stamp.Version) ?? AppRelease.ReadVersionFile(_environment.ContentRootPath));
         }
         catch (Exception ex)
         {
@@ -246,7 +254,11 @@ public sealed class AppUpdateService
                 return null;
             }
 
-            return ToSummary(commit.Sha, commit.Commit?.Committer?.Date, commit.Commit?.Message);
+            return ToSummary(
+                commit.Sha,
+                commit.Commit?.Committer?.Date,
+                commit.Commit?.Message,
+                await TryReadGithubVersionAsync(client, cancellationToken));
         }
         catch (Exception ex)
         {
@@ -323,14 +335,47 @@ public sealed class AppUpdateService
         }
     }
 
-    private static AppVersionSummary ToSummary(string sha, DateTimeOffset? timestamp, string? message)
+    private async Task<string?> TryReadGithubVersionAsync(HttpClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await client.GetAsync(
+                $"repos/{AppUpdateDefaults.RepoOwner}/{AppUpdateDefaults.RepoName}/contents/VERSION?ref={AppUpdateDefaults.Branch}",
+                cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var file = await response.Content.ReadFromJsonAsync<GitHubContentResponse>(cancellationToken);
+            if (file is null ||
+                !string.Equals(file.Encoding, "base64", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(file.Content))
+            {
+                return null;
+            }
+
+            var text = System.Text.Encoding.UTF8.GetString(
+                Convert.FromBase64String(file.Content.Replace("\n", string.Empty, StringComparison.Ordinal)));
+            return AppRelease.Normalize(text);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "GitHub VERSION file could not be read; falling back to commit time.");
+            return null;
+        }
+    }
+
+    private static AppVersionSummary ToSummary(string sha, DateTimeOffset? timestamp, string? message, string? version = null)
     {
         var trimmed = sha.Trim();
         var shortSha = trimmed.Length <= 7 ? trimmed : trimmed[..7];
         var firstLine = string.IsNullOrWhiteSpace(message)
             ? null
             : message.Split('\n', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        return new AppVersionSummary(trimmed, shortSha, timestamp, firstLine);
+        var calendar = AppRelease.Normalize(version)
+            ?? (timestamp is { } builtAt ? AppRelease.FromTimestamp(builtAt) : null);
+        return new AppVersionSummary(trimmed, shortSha, timestamp, firstLine, calendar);
     }
 
     private static string GetChannel() =>
@@ -363,5 +408,14 @@ public sealed class AppUpdateService
     {
         [JsonPropertyName("date")]
         public DateTimeOffset Date { get; set; }
+    }
+
+    private sealed class GitHubContentResponse
+    {
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
+
+        [JsonPropertyName("encoding")]
+        public string? Encoding { get; set; }
     }
 }

@@ -5,6 +5,7 @@ public sealed record AppVersionStamp
     public string CommitSha { get; init; } = string.Empty;
     public string Branch { get; init; } = "main";
     public DateTimeOffset? BuiltAt { get; init; }
+    public string Version { get; init; } = string.Empty;
     public string RepoOwner { get; init; } = AppUpdateDefaults.RepoOwner;
     public string RepoName { get; init; } = AppUpdateDefaults.RepoName;
 }
@@ -13,7 +14,8 @@ public sealed record AppVersionSummary(
     string Sha,
     string ShortSha,
     DateTimeOffset? Timestamp,
-    string? Message);
+    string? Message,
+    string? Version);
 
 public sealed record AppUpdateStatusResponse(
     bool CanApply,

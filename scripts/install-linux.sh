@@ -265,11 +265,20 @@ write_version_stamp() {
     [[ -n "$sha" ]] || sha="unknown"
     [[ -n "$built_at" ]] || built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+    local version=""
+    if [[ -f "$REPO_ROOT/VERSION" ]]; then
+        version="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")"
+    fi
+    if [[ -z "$version" ]]; then
+        version="$(date +%Y.%-m.%-d.%-H.%-M)"
+    fi
+
     cat >"$PUBLISH_TMP/version.json" <<EOF
 {
   "commitSha": "$sha",
   "branch": "$branch",
   "builtAt": "$built_at",
+  "version": "$version",
   "repoOwner": "itdevconsulting",
   "repoName": "HomeSkyQLiveStreamingPlayer"
 }

@@ -245,10 +245,21 @@ function Write-VersionStamp {
         $builtAt = [DateTimeOffset]::UtcNow.ToString("o")
     }
 
+    $version = ""
+    $versionPath = Join-Path $repoRoot "VERSION"
+    if (Test-Path $versionPath) {
+        $version = (Get-Content -Path $versionPath -Raw).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        $now = Get-Date
+        $version = "{0}.{1}.{2}.{3}.{4}" -f $now.Year, $now.Month, $now.Day, $now.Hour, $now.Minute
+    }
+
     $stamp = [ordered]@{
         commitSha = $sha
         branch = $branch
         builtAt = $builtAt
+        version = $version
         repoOwner = "itdevconsulting"
         repoName = "HomeSkyQLiveStreamingPlayer"
     } | ConvertTo-Json

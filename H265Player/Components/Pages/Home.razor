@@ -390,10 +390,12 @@
             return "Unknown";
         }
 
-        var stamp = version.Timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "no date";
+        var calendar = version.Version
+            ?? (version.Timestamp is { } timestamp ? AppRelease.FromTimestamp(timestamp) : null)
+            ?? "unknown";
         return string.IsNullOrWhiteSpace(version.Message)
-            ? $"{version.ShortSha} ({stamp})"
-            : $"{version.ShortSha} ({stamp}) {version.Message}";
+            ? $"{calendar} ({version.ShortSha})"
+            : $"{calendar} ({version.ShortSha}) {version.Message}";
     }
 
     private sealed class ApiEnvelope<T>

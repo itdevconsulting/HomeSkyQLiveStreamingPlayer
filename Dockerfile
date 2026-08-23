@@ -1,13 +1,15 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim AS build
 WORKDIR /src
 COPY H265Player/H265Player.csproj H265Player/
+COPY VERSION VERSION
 RUN dotnet restore H265Player/H265Player.csproj
 COPY H265Player/ H265Player/
 ARG GIT_SHA=unknown
 ARG GIT_BRANCH=main
-RUN dotnet publish H265Player/H265Player.csproj -c Release -o /app/publish --no-restore \
-    && printf '{\n  "commitSha": "%s",\n  "branch": "%s",\n  "builtAt": "%s",\n  "repoOwner": "itdevconsulting",\n  "repoName": "HomeSkyQLiveStreamingPlayer"\n}\n' \
-        "$GIT_SHA" "$GIT_BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+RUN APP_VERSION="$(tr -d '[:space:]' < VERSION)" \
+    && dotnet publish H265Player/H265Player.csproj -c Release -o /app/publish --no-restore \
+    && printf '{\n  "commitSha": "%s",\n  "branch": "%s",\n  "builtAt": "%s",\n  "version": "%s",\n  "repoOwner": "itdevconsulting",\n  "repoName": "HomeSkyQLiveStreamingPlayer"\n}\n' \
+        "$GIT_SHA" "$GIT_BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$APP_VERSION" \
         > /app/publish/version.json
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim AS runtime

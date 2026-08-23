@@ -8,7 +8,12 @@
     <Title>Home Sky Q Live Streaming Player</Title>
     <Product>Home Sky Q Live Streaming Player</Product>
     <Description>Secure low-latency live home Sky Q streaming and remote control over the internet.</Description>
+    <InformationalVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</InformationalVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="..\VERSION" Link="VERSION" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />

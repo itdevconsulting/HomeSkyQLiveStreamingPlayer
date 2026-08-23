@@ -26,6 +26,7 @@ var webApplicationOptions = new WebApplicationOptions
 var builder = WebApplication.CreateBuilder(webApplicationOptions);
 builder.WebHost.UseStaticWebAssets();
 AppPaths.Initialize(builder.Environment.ContentRootPath);
+H265Player.AppRelease.Initialize(builder.Environment.ContentRootPath);
 var localSetupPath = AppPaths.File("local-settings.json");
 var persistedLocalSetup = LocalSetupStore.LoadFromPath(localSetupPath);
 var configuredUnauthenticatedPort = NormalizeOptionalPort(builder.Configuration.GetValue<int?>("Access:UnauthenticatedPort"))
