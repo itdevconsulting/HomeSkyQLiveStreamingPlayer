@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY H265Player/H265Player.csproj H265Player/
 COPY VERSION VERSION
@@ -12,7 +12,7 @@ RUN APP_VERSION="$(tr -d '[:space:]' < VERSION)" \
         "$GIT_SHA" "$GIT_BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$APP_VERSION" \
         > /app/publish/version.json
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
     && rm -rf /var/lib/apt/lists/*

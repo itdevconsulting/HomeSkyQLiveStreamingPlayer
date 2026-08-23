@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG REPO_URL=https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer.git
 ARG REPO_REF=main
 WORKDIR /src
@@ -14,7 +14,7 @@ RUN apt-get update \
         "$GIT_SHA" "$GIT_BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$APP_VERSION" \
         > /app/publish/version.json
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates jq \
     && rm -rf /var/lib/apt/lists/*
