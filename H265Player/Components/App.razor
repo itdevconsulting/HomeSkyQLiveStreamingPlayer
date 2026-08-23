@@ -727,8 +727,11 @@ code {
 
 .player-host {
     width: 100%;
-    height: 100%;
-    min-height: min(56vh, 640px);
+    max-width: 640px;
+    height: auto;
+    min-height: 180px;
+    max-height: min(32vh, 320px);
+    aspect-ratio: 16 / 9;
     border-radius: 16px;
     border: 1px solid var(--border);
     background: #000;
@@ -781,12 +784,21 @@ code {
 
 .video-host {
     width: 100%;
-    height: 100%;
-    min-height: min(56vh, 640px);
+    max-width: 640px;
+    height: auto;
+    min-height: 180px;
+    max-height: min(32vh, 320px);
+    aspect-ratio: 16 / 9;
     border-radius: 16px;
     border: 1px solid var(--border);
     background: #000;
     object-fit: contain;
+}
+
+.player-panel .log {
+    min-height: 72px;
+    max-height: 120px;
+    padding: 0.7rem 0.85rem;
 }
 
 .log {
@@ -1858,7 +1870,8 @@ code {
 
     .player-host,
     .video-host {
-        min-height: 220px;
+        min-height: 160px;
+        max-height: min(28vh, 240px);
     }
 
     .panel-head,
@@ -1941,7 +1954,7 @@ code {
     }
 }
     </style>
-    <link rel="stylesheet" href="/H265Player.styles.css?v=20260821-nav2" />
+    <link rel="stylesheet" href="/H265Player.styles.css?v=20260823-setup1" />
     <link rel="stylesheet" href="/vendor/video-js.min.css?v=20260413-style7" />
     <link rel="icon" type="image/png" href="favicon.png" />
     <HeadOutlet @rendermode="InteractiveServer" />
@@ -1952,7 +1965,7 @@ code {
     <script src="/vendor/mpegts.min.js"></script>
     <script src="/vendor/hls.min.js"></script>
     <script src="/vendor/video.min.js"></script>
-    <script src="/player.js?v=20260821-nav4"></script>
+    <script src="/player.js?v=20260823-setup1"></script>
     <script src="/_framework/blazor.web.js"></script>
 </body>
 </html>

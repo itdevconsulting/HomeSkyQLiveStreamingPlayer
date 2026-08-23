@@ -58,6 +58,7 @@ function buildManagedPlayer(hostId, onStatus, onLog, url, autoPlay, ignoreAudio)
         onLog?.(`Decoder error ${JSON.stringify(error)}`);
     };
 
+    const hostSize = getManagedHostSize(hostId);
     player.build({
         player_id: hostId,
         base_url: sdkBaseUrl,
@@ -66,7 +67,7 @@ function buildManagedPlayer(hostId, onStatus, onLog, url, autoPlay, ignoreAudio)
         ext_src_js_uri: "extjs.js",
         ext_wasm_js_uri: "extwasm.js",
         width: "100%",
-        height: 520,
+        height: hostSize?.height || 280,
         color: "#000000",
         auto_play: autoPlay,
         ignore_audio: ignoreAudio,
