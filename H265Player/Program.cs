@@ -935,7 +935,7 @@ static bool IsAnonymousPath(PathString path)
         return true;
     }
 
-    return path.Value is "/app.css" or "/player.js" or "/favicon.png";
+    return path.Value is "/app.css" or "/player.js" or "/favicon.png" or "/apple-touch-icon.png";
 }
 
 static string? BuildEmailHint(string email)
