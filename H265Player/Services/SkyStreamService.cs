@@ -154,6 +154,27 @@ public sealed class SkyStreamService : IDisposable
         }
     }
 
+    public async Task WarmAsync(string host, CancellationToken cancellationToken)
+    {
+        if (!IPAddress.TryParse(host, out var address) ||
+            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
+        {
+            return;
+        }
+
+        var hostKey = host.Trim();
+        var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            await GetClientAsync(hostKey, [], cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private async Task<System.Text.Json.JsonElement> SendKeyWithRetryAsync(
         string host,
         string key,
@@ -182,6 +203,24 @@ public sealed class SkyStreamService : IDisposable
     private async Task<SkyStreamClient> GetClientAsync(string host, List<string> logs, CancellationToken cancellationToken)
     {
         var lazy = _sessions.GetOrAdd(host, _ => new Lazy<Task<SkyStreamClient>>(() => OpenAsync(host, logs, cancellationToken)));
+        try
+        {
+            var client = await lazy.Value;
+            if (client.IsBound)
+            {
+                return client;
+            }
+
+            logs.Add("Session was no longer bound; opening a new one.");
+        }
+        catch
+        {
+            _sessions.TryRemove(host, out _);
+            throw;
+        }
+
+        await DropSessionAsync(host);
+        lazy = _sessions.GetOrAdd(host, _ => new Lazy<Task<SkyStreamClient>>(() => OpenAsync(host, logs, cancellationToken)));
         try
         {
             return await lazy.Value;

@@ -165,6 +165,7 @@
         "The page loads the cached Sky Stream box list on startup. It does not need to scan every time.",
         "Keep the puck on its UK-egress gateway. Install this service on that gateway box so TCP 8091 is local. Tailscale is only for the web UI.",
         "Number keys are queued with a short gap so rapid channel entry is not dropped. Scan and Wake still lock the page.",
+        "The first key after connecting used to fire before the box was ready. The session now settles after bind, and selecting a box pre-opens it.",
         "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private NICs.",
         "Select a discovered box before sending any remote command.",
         "Wake puck is optional. If you already woke the box another way, just send keys.",
@@ -261,6 +262,18 @@
             }
             CommandStatus = forceRefresh ? "Scan complete" : "Loaded cached scan";
             LogText = $"Scanned: {string.Join(", ", ScanResult.Networks)}{Environment.NewLine}Found: {ScanResult.Devices.Count}{Environment.NewLine}Last scan: {ScanResult.LastScanAt?.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
+            if (SelectedDevice is not null)
+            {
+                try
+                {
+                    await SkyStreamService.WarmAsync(SelectedDevice.Host, CancellationToken.None);
+                    LogText += $"{Environment.NewLine}Sky Remote session ready for {SelectedDevice.Host}.";
+                }
+                catch (Exception ex)
+                {
+                    LogText += $"{Environment.NewLine}Could not pre-open Sky Remote: {ex.Message}";
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -273,7 +286,7 @@
         }
     }
 
-    private void SelectDevice(SkyStreamDevice device)
+    private async Task SelectDevice(SkyStreamDevice device)
     {
         SelectedDevice = device;
         TestHost = device.Host;
@@ -282,8 +295,19 @@
             MacAddress = device.MacAddress;
         }
 
-        CommandStatus = "Device selected";
+        CommandStatus = "Opening Sky Remote session";
         LogText = $"Selected {FormatDevice(device)}";
+        try
+        {
+            await SkyStreamService.WarmAsync(device.Host, CancellationToken.None);
+            CommandStatus = "Ready";
+            LogText = $"Selected {FormatDevice(device)}. Session ready.";
+        }
+        catch (Exception ex)
+        {
+            CommandStatus = "Session failed";
+            LogText = $"{FormatDevice(device)}{Environment.NewLine}{ex.Message}";
+        }
     }
 
     private async Task WakeAsync()
