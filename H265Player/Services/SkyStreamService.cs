@@ -167,7 +167,6 @@ public sealed class SkyStreamService : IDisposable
 
     private async Task<SkyStreamClient> OpenAsync(string host, List<string> logs, CancellationToken cancellationToken)
     {
-        await WakeIfNeededAsync(host.Trim(), macAddress: null, waitForPort: true, logs, cancellationToken);
         logs.Add("Opening mTLS WebSocket to /iptarget.");
         var client = new SkyStreamClient(host);
         await client.ConnectAndBindAsync(cancellationToken);
