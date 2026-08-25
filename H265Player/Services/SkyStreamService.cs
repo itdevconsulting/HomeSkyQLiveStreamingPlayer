@@ -145,6 +145,11 @@ public sealed class SkyStreamService : IDisposable
         catch (Exception first)
         {
             logs.Add($"First attempt failed: {first.Message}");
+            if (IsTcpUnreachable(first))
+            {
+                throw;
+            }
+
             await DropSessionAsync(host);
             var client = await GetClientAsync(host, logs, cancellationToken);
             return await client.SendKeyAsync(key, cancellationToken);
@@ -168,12 +173,26 @@ public sealed class SkyStreamService : IDisposable
     private async Task<SkyStreamClient> OpenAsync(string host, List<string> logs, CancellationToken cancellationToken)
     {
         logs.Add("Opening mTLS WebSocket to /iptarget.");
-        var client = new SkyStreamClient(host);
+        var client = new SkyStreamClient(host, log: logs.Add);
         await client.ConnectAndBindAsync(cancellationToken);
         logs.Add(string.IsNullOrWhiteSpace(client.DeviceName)
             ? "Paired and bound."
             : $"Paired and bound to {client.DeviceName}.");
         return client;
+    }
+
+    private static bool IsTcpUnreachable(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains("did not connect", StringComparison.OrdinalIgnoreCase) ||
+                current.Message.Contains("8091/tcp filtered", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public async Task<SkyQCommandResult> WakeAsync(string host, string? macAddress, CancellationToken cancellationToken)
@@ -577,11 +596,11 @@ public sealed class SkyStreamService : IDisposable
             var mac = ResolveMac(text, null);
             if (pingable && string.IsNullOrWhiteSpace(mac))
             {
-                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} is closed. Sleeping Stream pucks need a Wake-on-LAN MAC, then a magic packet before 8091 opens.");
+                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} is closed or filtered. nmap filtered means the host is up while Sky Remote is still firewalled — Home cannot be sent until 8091 is open. Sleeping pucks also need a Wake-on-LAN MAC.");
             }
             else if (pingable)
             {
-                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} stayed closed after Wake-on-LAN.");
+                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} stayed closed or filtered after Wake-on-LAN. ICMP through Tailscale is not enough; the subnet route must forward TCP 8091.");
             }
             else
             {

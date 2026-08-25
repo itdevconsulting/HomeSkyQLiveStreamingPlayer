@@ -115,6 +115,19 @@
         <button type="button" @onclick="WakeAsync" disabled="@IsBusy">Wake puck</button>
     </div>
 
+    <div class="scan-network-add">
+        <label class="field">
+            <span>Test host IP</span>
+            <input type="text"
+                   @bind="TestHost"
+                   spellcheck="false"
+                   placeholder="192.168.80.147"
+                   autocomplete="off" />
+        </label>
+        <button type="button" @onclick="SendHomeProbeAsync" disabled="@IsBusy">Send Home</button>
+    </div>
+    <p class="lede">Send Home runs the real Sky Remote pair, bind, and Home key against this IP (or the selected box if the field is empty). Use it to confirm 8091 is reachable from this service, not only that the puck pings.</p>
+
     <div class="control-grid skyq-remote-grid">
         @foreach (var command in PrimaryCommands)
         {
@@ -153,6 +166,8 @@
         "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private subnets plus any additional networks you add.",
         "Select a discovered box before sending any remote command.",
         "Wake puck is optional. If you already woke the box another way, just send keys.",
+        "Send Home runs the real Sky Remote pair/bind/Home sequence against the test IP or the selected box. Use it to confirm 8091 is reachable from the machine running this service.",
+        "nmap 8091/tcp filtered means the puck answers ping while Sky Remote TCP is still dropped. Home cannot be sent until that port is open from this host.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts."
     ];
@@ -160,6 +175,7 @@
     private SkyStreamScanResponse? ScanResult { get; set; }
     private SkyStreamDevice? SelectedDevice { get; set; }
     private string MacAddress { get; set; } = string.Empty;
+    private string TestHost { get; set; } = string.Empty;
     private string LastCommand { get; set; } = "None";
     private string CommandStatus { get; set; } = "Idle";
     private string LogText { get; set; } = string.Empty;
@@ -259,6 +275,7 @@
     private void SelectDevice(SkyStreamDevice device)
     {
         SelectedDevice = device;
+        TestHost = device.Host;
         if (!string.IsNullOrWhiteSpace(device.MacAddress))
         {
             MacAddress = device.MacAddress;
@@ -304,19 +321,37 @@
         }
     }
 
+    private async Task SendHomeProbeAsync()
+    {
+        var host = !string.IsNullOrWhiteSpace(TestHost) ? TestHost.Trim() : SelectedDevice?.Host;
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            CommandStatus = "No host";
+            LogText = "Enter a Sky Stream IP or select a discovered box, then Send Home.";
+            return;
+        }
+
+        await SendCommandToHostAsync(host, "home");
+    }
+
     private async Task SendCommandAsync(string command)
     {
         if (SelectedDevice is null)
         {
             CommandStatus = "No device selected";
-            LogText = "Select a discovered Sky Stream box first.";
+            LogText = "Select a discovered Sky Stream box first, or use Send Home with a test IP.";
             return;
         }
 
+        await SendCommandToHostAsync(SelectedDevice.Host, command);
+    }
+
+    private async Task SendCommandToHostAsync(string host, string command)
+    {
         IsBusy = true;
         try
         {
-            var result = await SkyStreamService.SendCommandAsync(SelectedDevice.Host, command, CancellationToken.None);
+            var result = await SkyStreamService.SendCommandAsync(host, command, CancellationToken.None);
             LastCommand = command;
             CommandStatus = result.Success ? "Sent" : "Failed";
             LogText = string.Join(Environment.NewLine, new[] { result.Message }.Concat(result.Logs));

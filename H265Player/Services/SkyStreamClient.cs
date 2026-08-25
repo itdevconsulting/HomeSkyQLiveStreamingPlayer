@@ -17,6 +17,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
 
     private readonly string _host;
     private readonly int _port;
+    private readonly Action<string>? _log;
     private TcpClient? _tcp;
     private SslStream? _ssl;
     private WebSocket? _socket;
@@ -25,10 +26,11 @@ internal sealed class SkyStreamClient : IAsyncDisposable
     private string? _authToken;
     private int? _bindId;
 
-    public SkyStreamClient(string host, int port = SkyStreamCredentials.Port)
+    public SkyStreamClient(string host, int port = SkyStreamCredentials.Port, Action<string>? log = null)
     {
         _host = host;
         _port = port;
+        _log = log;
     }
 
     public string? DeviceName { get; private set; }
@@ -38,6 +40,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
     public async Task ConnectAndBindAsync(CancellationToken cancellationToken)
     {
         await ConnectAsync(cancellationToken);
+        Log("Sending Pair Request.");
         var pair = await PairAsync(cancellationToken);
         var pairingCode = pair.GetString("pairingcode");
         var stbNonce = pair.GetString("stbnonce");
@@ -47,7 +50,10 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         }
 
         DeviceName = pair.GetString("name");
+        Log(string.IsNullOrWhiteSpace(DeviceName) ? "Paired." : $"Paired with {DeviceName}.");
+        Log("Sending Bind Request.");
         await BindAsync(pairingCode, stbNonce, cancellationToken);
+        Log($"Bound bind_id={_bindId}.");
     }
 
     public async Task<JsonElement> SendKeyAsync(string key, CancellationToken cancellationToken)
@@ -66,6 +72,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
             ["cmd"] = "keyatomic",
             ["key"] = key
         }, cancellationToken);
+        Log($"Sent key {key}.");
 
         return await ReceiveJsonAsync(cancellationToken);
     }
@@ -106,10 +113,24 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         }
 
         _tcp = new TcpClient();
-        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        connectCts.CancelAfter(TimeSpan.FromSeconds(8));
-        await _tcp.ConnectAsync(address, _port, connectCts.Token);
+        Log($"TCP connect {_host}:{_port} ...");
+        try
+        {
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            connectCts.CancelAfter(TimeSpan.FromSeconds(8));
+            await _tcp.ConnectAsync(address, _port, connectCts.Token);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException)
+        {
+            _tcp.Dispose();
+            _tcp = null;
+            throw new InvalidOperationException(
+                $"TCP {_host}:{_port} did not connect in 8s ({ex.GetType().Name}: {ex.Message}). " +
+                "If nmap shows 8091/tcp filtered, the puck can ping while Sky Remote is still firewalled — Home cannot be sent until that port is open, not filtered.",
+                ex);
+        }
 
+        Log("TCP connected. Starting mTLS (SNI sky.xcal.tv, ALPN http/1.1).");
         _ssl = new SslStream(_tcp.GetStream(), leaveInnerStreamOpen: true, static (_, _, _, _) => true);
         var sslOptions = new SslClientAuthenticationOptions
         {
@@ -120,8 +141,16 @@ internal sealed class SkyStreamClient : IAsyncDisposable
             ClientCertificateContext = SkyStreamCredentials.CertificateContext,
             ApplicationProtocols = [SslApplicationProtocol.Http11]
         };
-        await _ssl.AuthenticateAsClientAsync(sslOptions, cancellationToken);
+        try
+        {
+            await _ssl.AuthenticateAsClientAsync(sslOptions, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"TLS/mTLS to {_host}:{_port} failed: {ex.Message}", ex);
+        }
 
+        Log($"TLS negotiated {_ssl.NegotiatedCipherSuite}. GET /iptarget WebSocket upgrade.");
         var wsKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
         var upgrade =
             $"GET /iptarget HTTP/1.1\r\n" +
@@ -139,6 +168,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
 
         var response = await ReadHttpHeadersAsync(_ssl, cancellationToken);
         var statusLine = response.Split('\n')[0].Trim();
+        Log($"Upgrade response: {statusLine}");
         if (!statusLine.Contains("101", StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"Sky Stream WebSocket upgrade failed: {statusLine}");
@@ -149,7 +179,10 @@ internal sealed class SkyStreamClient : IAsyncDisposable
             IsServer = false,
             KeepAliveInterval = TimeSpan.FromSeconds(20)
         });
+        Log("WebSocket open.");
     }
+
+    private void Log(string message) => _log?.Invoke(message);
 
     private async Task<JsonElement> PairAsync(CancellationToken cancellationToken)
     {
