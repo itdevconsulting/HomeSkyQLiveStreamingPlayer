@@ -10,6 +10,8 @@ public sealed record LocalSetupSettings
     public bool EnableUnauthenticatedPort { get; init; }
     public int? UnauthenticatedPort { get; init; } = 5222;
     public bool AutoUpdateEnabled { get; init; }
+    public IReadOnlyList<string> ExtraScanNetworks { get; init; } = [];
+    public IReadOnlyList<string> DetectedScanNetworks { get; init; } = [];
 
     [JsonIgnore]
     public bool IsConfigured => !string.IsNullOrWhiteSpace(FfmpegPath);
@@ -19,3 +21,5 @@ public sealed record LocalSetupSettings
             ? UnauthenticatedPort
             : null;
 }
+
+public sealed record ScanNetworksRequest(IReadOnlyList<string>? ExtraScanNetworks);

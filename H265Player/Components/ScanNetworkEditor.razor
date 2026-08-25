@@ -1,0 +1,273 @@
+@inject IJSRuntime JS
+
+<div class="scan-networks">
+    <div class="scan-networks-copy">
+        <p class="eyebrow">Scan networks</p>
+        <h2>Sky Q and Sky Stream discovery</h2>
+        <p class="lede">Connected private, VPN, and Tailscale subnets are scanned automatically. Add extra IPv4 subnets that this machine can route to but does not have a local address on, such as a UK-egress Sky Stream network.</p>
+    </div>
+
+    <div class="scan-networks-group">
+        <span class="label">Detected on this machine</span>
+        <div class="scan-network-chips">
+            @if (Detected.Count == 0)
+            {
+                <span class="scan-network-empty">No private IPv4 subnets detected yet.</span>
+            }
+            else
+            {
+                @foreach (var cidr in Detected)
+                {
+                    <span class="scan-network-chip scan-network-chip-detected" title="Detected from a local interface">@cidr</span>
+                }
+            }
+        </div>
+    </div>
+
+    <div class="scan-networks-group">
+        <span class="label">Additional subnets</span>
+        <div class="scan-network-chips">
+            @if (Extras.Count == 0)
+            {
+                <span class="scan-network-empty">None yet. Add a subnet such as 10.8.0.0/24 or a single host such as 10.8.0.10.</span>
+            }
+            else
+            {
+                @foreach (var cidr in Extras)
+                {
+                    <span class="scan-network-chip">
+                        <span>@cidr</span>
+                        @if (CanEdit)
+                        {
+                            <button type="button" class="scan-network-chip-remove" title="Remove @cidr" @onclick="() => RemoveAsync(cidr)">×</button>
+                        }
+                    </span>
+                }
+            }
+        </div>
+    </div>
+
+    @if (CanEdit)
+    {
+        <div class="scan-network-add">
+            <label class="field">
+                <span>Add subnet or host</span>
+                <input type="text"
+                       @bind="_draft"
+                       @bind:event="oninput"
+                       @onkeydown="OnDraftKeyDown"
+                       spellcheck="false"
+                       placeholder="10.8.0.0/24 or 10.8.0.10"
+                       autocomplete="off" />
+            </label>
+            <button type="button" @onclick="AddAsync" disabled="@_busy">Add</button>
+        </div>
+    }
+    else
+    {
+        <p class="lede">Additional networks can be edited from Setup on a trusted network.</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="setup-inline-error">@_error</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_success))
+    {
+        <div class="setup-inline-success">@_success</div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<string> ExtraScanNetworks { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> ExtraScanNetworksChanged { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<string> DetectedScanNetworks { get; set; } = [];
+
+    [Parameter]
+    public bool AutoSave { get; set; }
+
+    [Parameter]
+    public EventCallback Saved { get; set; }
+
+    private readonly List<string> _extras = [];
+    private readonly List<string> _detected = [];
+    private string _draft = string.Empty;
+    private string _error = string.Empty;
+    private string _success = string.Empty;
+    private bool _busy;
+    private bool _canEdit = true;
+    private bool _loaded;
+
+    private IReadOnlyList<string> Extras => _extras;
+    private IReadOnlyList<string> Detected => _detected;
+    private bool CanEdit => _canEdit && !_busy;
+
+    protected override void OnParametersSet()
+    {
+        if (AutoSave)
+        {
+            return;
+        }
+
+        Replace(_detected, DetectedScanNetworks);
+        Replace(_extras, ExtraScanNetworks);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loaded || !AutoSave)
+        {
+            return;
+        }
+
+        _loaded = true;
+        await LoadFromApiAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnDraftKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await AddAsync();
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        _error = string.Empty;
+        _success = string.Empty;
+        if (!PrivateIpv4.TryParseCidr(_draft, out var parsed, out var error))
+        {
+            _error = error ?? "Enter a private IPv4 subnet or host.";
+            return;
+        }
+
+        if (_detected.Contains(parsed.Cidr, StringComparer.OrdinalIgnoreCase))
+        {
+            _error = $"{parsed.Cidr} is already detected on this machine.";
+            _draft = string.Empty;
+            return;
+        }
+
+        if (_extras.Contains(parsed.Cidr, StringComparer.OrdinalIgnoreCase))
+        {
+            _draft = string.Empty;
+            return;
+        }
+
+        _extras.Add(parsed.Cidr);
+        _extras.Sort(StringComparer.OrdinalIgnoreCase);
+        _draft = string.Empty;
+        await PersistAsync($"{parsed.Cidr} added.");
+    }
+
+    private async Task RemoveAsync(string cidr)
+    {
+        _error = string.Empty;
+        _success = string.Empty;
+        _extras.RemoveAll(item => string.Equals(item, cidr, StringComparison.OrdinalIgnoreCase));
+        await PersistAsync($"{cidr} removed.");
+    }
+
+    private async Task PersistAsync(string successText)
+    {
+        if (AutoSave)
+        {
+            await SaveToApiAsync(successText);
+            return;
+        }
+
+        await ExtraScanNetworksChanged.InvokeAsync(_extras.ToList());
+    }
+
+    private async Task LoadFromApiAsync()
+    {
+        var authResponse = await JS.InvokeAsync<ApiEnvelope<AuthStatusResponse>>("h265Auth.fetchJson", "/api/auth/status");
+        _canEdit = authResponse.Json is { TrustedNetwork: true } or { UnauthenticatedAccess: true };
+
+        var setupResponse = await JS.InvokeAsync<ApiEnvelope<System.Text.Json.JsonElement>>("h265Auth.fetchJson", "/api/setup");
+        if (!setupResponse.Ok || setupResponse.Json.ValueKind is System.Text.Json.JsonValueKind.Undefined or System.Text.Json.JsonValueKind.Null)
+        {
+            _error = string.IsNullOrWhiteSpace(setupResponse.Text)
+                ? "Unable to load scan networks."
+                : setupResponse.Text;
+            return;
+        }
+
+        Apply(ParseSetup(setupResponse.Json));
+    }
+
+    private async Task SaveToApiAsync(string successText)
+    {
+        _busy = true;
+        try
+        {
+            var response = await JS.InvokeAsync<ApiEnvelope<System.Text.Json.JsonElement>>("h265Auth.fetchJson", "/api/setup/scan-networks", new
+            {
+                method = "POST",
+                body = System.Text.Json.JsonSerializer.Serialize(
+                    new ScanNetworksRequest(_extras.ToList()),
+                    new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+            });
+            if (!response.Ok)
+            {
+                _error = response.Status == StatusCodes.Status403Forbidden
+                    ? "Additional networks can be edited from Setup on a trusted network."
+                    : response.Text;
+                await LoadFromApiAsync();
+                return;
+            }
+
+            if (response.Json.ValueKind is not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null)
+            {
+                Apply(ParseSetup(response.Json));
+            }
+
+            _success = successText;
+            await ExtraScanNetworksChanged.InvokeAsync(_extras.ToList());
+            await Saved.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Apply(LocalSetupSettings settings)
+    {
+        Replace(_detected, settings.DetectedScanNetworks);
+        Replace(_extras, settings.ExtraScanNetworks);
+    }
+
+    private static LocalSetupSettings ParseSetup(System.Text.Json.JsonElement json) =>
+        System.Text.Json.JsonSerializer.Deserialize<LocalSetupSettings>(
+            json.GetRawText(),
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+        ?? new LocalSetupSettings();
+
+    private static void Replace(List<string> target, IEnumerable<string>? values)
+    {
+        target.Clear();
+        if (values is null)
+        {
+            return;
+        }
+
+        target.AddRange(values.Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase));
+        target.Sort(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class ApiEnvelope<T>
+    {
+        public bool Ok { get; set; }
+        public int Status { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public T? Json { get; set; }
+    }
+}

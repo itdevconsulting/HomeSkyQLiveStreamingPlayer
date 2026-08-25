@@ -51,12 +51,14 @@ public sealed class SkyStreamService : IDisposable
     private readonly string _cachePath;
     private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
     private readonly ILogger<SkyStreamService> _logger;
+    private readonly LocalSetupStore _setupStore;
     private SkyStreamScanResponse _cachedScan;
     private DateTimeOffset? _lastScanAt;
     private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromHours(1);
 
-    public SkyStreamService(IHostEnvironment environment, ILogger<SkyStreamService> logger)
+    public SkyStreamService(IHostEnvironment environment, LocalSetupStore setupStore, ILogger<SkyStreamService> logger)
     {
+        _setupStore = setupStore;
         _logger = logger;
         _cachePath = AppPaths.File("sky-stream-cache.json");
         _cachedScan = LoadCachedScan();
@@ -97,7 +99,8 @@ public sealed class SkyStreamService : IDisposable
 
     public async Task<SkyQCommandResult> SendCommandAsync(string host, string command, CancellationToken cancellationToken)
     {
-        if (!IPAddress.TryParse(host, out var address) || !PrivateIpv4.IsPrivate(address))
+        if (!IPAddress.TryParse(host, out var address) ||
+            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
         {
             return new SkyQCommandResult(false, host, command, "Sky Stream control is limited to private IPv4 addresses.", []);
         }
@@ -213,10 +216,21 @@ public sealed class SkyStreamService : IDisposable
 
     private async Task<SkyStreamScanResponse> ScanInternalAsync(CancellationToken cancellationToken)
     {
+        var extraScanNetworks = _setupStore.Get().ExtraScanNetworks;
         var interfaceScan = PrivateIpv4.GetInterfaces(_logger);
+        var extras = PrivateIpv4.ExtraScanTargets(extraScanNetworks);
+        var extraOnly = extras
+            .Where(extra => interfaceScan.Interfaces.All(local =>
+                !string.Equals(local.Cidr, extra.Cidr, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
         var skipped = interfaceScan.Messages.ToList();
-        var networks = interfaceScan.Interfaces.Select(item => item.Cidr).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToList();
-        if (interfaceScan.Interfaces.Count == 0)
+        var networks = interfaceScan.Interfaces.Select(item => item.Cidr)
+            .Concat(extras.Select(item => item.Cidr))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (interfaceScan.Interfaces.Count == 0 && extras.Count == 0)
         {
             if (skipped.Count == 0)
             {
@@ -227,14 +241,29 @@ public sealed class SkyStreamService : IDisposable
         }
 
         var candidates = new Dictionary<string, SkyStreamDevice>(StringComparer.OrdinalIgnoreCase);
-        foreach (var found in await SkyStreamMdns.QueryAsync(interfaceScan.Interfaces, cancellationToken))
+        if (interfaceScan.Interfaces.Count > 0)
         {
-            candidates[found.Host] = new SkyStreamDevice(found.Host, found.Name, found.Name, found.MacAddress, found.Port);
+            foreach (var found in await SkyStreamMdns.QueryAsync(interfaceScan.Interfaces, cancellationToken))
+            {
+                candidates[found.Host] = new SkyStreamDevice(found.Host, found.Name, found.Name, found.MacAddress, found.Port);
+            }
+        }
+        else
+        {
+            skipped.Add("No local private NIC; scanning additional networks only.");
         }
 
-        if (candidates.Count == 0)
+        if (candidates.Count == 0 && interfaceScan.Interfaces.Count > 0)
         {
             foreach (var open in await ProbePortAsync(interfaceScan.Interfaces, cancellationToken))
+            {
+                candidates[open] = new SkyStreamDevice(open, string.Empty, "Sky Stream", string.Empty, SkyStreamCredentials.Port);
+            }
+        }
+
+        if (extraOnly.Count > 0)
+        {
+            foreach (var open in await ProbePortAsync(extraOnly, cancellationToken))
             {
                 candidates[open] = new SkyStreamDevice(open, string.Empty, "Sky Stream", string.Empty, SkyStreamCredentials.Port);
             }
@@ -246,7 +275,9 @@ public sealed class SkyStreamService : IDisposable
 
         if (devices.Count == 0)
         {
-            skipped.Add("No Sky Stream boxes answered mDNS (_rdk-rics._tcp) or TCP port 8091.");
+            skipped.Add(extras.Count == 0
+                ? "No Sky Stream boxes answered mDNS (_rdk-rics._tcp) or TCP port 8091."
+                : "No Sky Stream boxes answered mDNS (_rdk-rics._tcp) or TCP port 8091 on connected or additional networks.");
         }
 
         return new SkyStreamScanResponse(networks, skipped, devices, null);
@@ -257,40 +288,15 @@ public sealed class SkyStreamService : IDisposable
         CancellationToken cancellationToken)
     {
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var hosts = interfaces.SelectMany(PrivateIpv4.EnumerateHosts).Distinct().ToList();
-        if (hosts.Count == 0)
+        var hosts = await PrivateIpv4.ProbeOpenTcpAsync(
+            interfaces.SelectMany(PrivateIpv4.EnumerateHosts),
+            SkyStreamCredentials.Port,
+            TimeSpan.FromMilliseconds(250),
+            32,
+            cancellationToken);
+        foreach (var host in hosts)
         {
-            return found;
-        }
-
-        using var gate = new SemaphoreSlim(32);
-        var tasks = hosts.Select(async address =>
-        {
-            await gate.WaitAsync(cancellationToken);
-            try
-            {
-                using var client = new TcpClient();
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromMilliseconds(250));
-                await client.ConnectAsync(address, SkyStreamCredentials.Port, cts.Token);
-                return address.ToString();
-            }
-            catch
-            {
-                return null;
-            }
-            finally
-            {
-                gate.Release();
-            }
-        });
-
-        foreach (var host in await Task.WhenAll(tasks))
-        {
-            if (!string.IsNullOrWhiteSpace(host))
-            {
-                found.Add(host);
-            }
+            found.Add(host.ToString());
         }
 
         return found;

@@ -9,7 +9,7 @@
         <div class="panel-copy">
             <p class="eyebrow">Sky Q</p>
             <h1>Sky Q Remote</h1>
-            <p class="lede">This page scans only the connected private IPv4 subnets on this machine, finds Sky Q boxes that expose the local JSON API, and sends remote key presses over the Sky Q LAN control socket.</p>
+            <p class="lede">This page scans connected private IPv4 subnets plus any additional networks you add, finds Sky Q boxes that expose the local JSON API, and sends remote key presses over the Sky Q LAN control socket.</p>
         </div>
         <PageInfo Title="Sky Q Remote" Summary="Use this page to discover Sky Q boxes on the local private network and send LAN remote-control commands." Items="HelpItems" />
     </div>
@@ -17,6 +17,8 @@
     <div class="toolbar">
         <button id="skyq-scan-button" type="button" @onclick="() => ScanAsync(true)">Scan Private Network</button>
     </div>
+
+    <ScanNetworkEditor AutoSave="true" Saved="OnScanNetworksSaved" />
 
     <div class="status-grid">
         <div>
@@ -69,7 +71,7 @@
         {
             <div class="home-card">
                 <strong>No Sky Q boxes yet</strong>
-                <span>Run the scan to probe the connected private subnets on this machine.</span>
+                <span>Run the scan to probe connected private subnets plus any additional networks you have added.</span>
             </div>
         }
     </div>
@@ -137,6 +139,7 @@
     [
         "The page loads the cached Sky Q box list on startup. It does not need to scan every time.",
         "Scan Private Network forces a fresh discovery run and updates the cache file used on the next app start.",
+        "If the box sits on a routed subnet that is not on a local NIC, add that subnet under Additional subnets, then scan again.",
         "Select a discovered box before sending any remote command.",
         "The command log shows the exact socket handshake and command result from the Sky Q control path.",
         "If a command fails with HTTP 200, read the JSON block in the log because it contains the logical success or failure from the server."
@@ -209,6 +212,8 @@
         await ScanAsync(false);
         StateHasChanged();
     }
+
+    private Task OnScanNetworksSaved() => ScanAsync(true);
 
     private async Task ScanAsync(bool forceRefresh)
     {

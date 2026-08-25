@@ -1831,6 +1831,74 @@ code {
     flex-wrap: wrap;
 }
 
+.scan-networks {
+    display: grid;
+    gap: 1rem;
+}
+
+.scan-networks-copy {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.scan-networks-copy h2 {
+    margin: 0;
+}
+
+.scan-networks-group {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.scan-network-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
+.scan-network-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.7rem 0.45rem 0.85rem;
+    border-radius: 999px;
+    background: rgba(137, 209, 133, 0.14);
+    border: 1px solid rgba(167, 240, 161, 0.28);
+    color: var(--accent-strong);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9rem;
+}
+
+.scan-network-chip-detected {
+    padding-right: 0.85rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: var(--text);
+}
+
+.scan-network-chip-remove {
+    width: 1.4rem;
+    height: 1.4rem;
+    padding: 0;
+    border-radius: 999px;
+    border: 0;
+    background: rgba(0, 0, 0, 0.28);
+    color: inherit;
+    line-height: 1;
+}
+
+.scan-network-empty {
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+.scan-network-add {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.8rem;
+    align-items: end;
+}
+
 .danger-button {
     background: rgba(160, 41, 41, 0.24);
     color: #ffd6d6;
@@ -1908,6 +1976,10 @@ code {
     }
 
     .setup-account-row {
+        grid-template-columns: 1fr;
+    }
+
+    .scan-network-add {
         grid-template-columns: 1fr;
     }
 }

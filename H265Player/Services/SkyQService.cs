@@ -1,7 +1,5 @@
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using H265Player.Models;
@@ -70,6 +68,7 @@ public sealed class SkyQService : IDisposable
     private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SkyQService> _logger;
+    private readonly LocalSetupStore _setupStore;
     private SkyQScanResponse _cachedScan;
     private DateTimeOffset? _lastScanAt;
     private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromHours(1);
@@ -77,9 +76,11 @@ public sealed class SkyQService : IDisposable
     public SkyQService(
         IHttpClientFactory httpClientFactory,
         IHostEnvironment environment,
+        LocalSetupStore setupStore,
         ILogger<SkyQService> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _setupStore = setupStore;
         _logger = logger;
         _cachePath = AppPaths.File("skyq-cache.json");
         _cachedScan = LoadCachedScan();
@@ -137,12 +138,21 @@ public sealed class SkyQService : IDisposable
 
     private async Task<SkyQScanResponse> ScanInternalAsync(CancellationToken cancellationToken)
     {
-        var interfaceScan = GetPrivateInterfaces();
-        var interfaces = interfaceScan.Interfaces;
+        var extraScanNetworks = _setupStore.Get().ExtraScanNetworks;
+        var interfaceScan = PrivateIpv4.GetInterfaces(_logger);
+        var extras = PrivateIpv4.ExtraScanTargets(extraScanNetworks);
+        var extraOnly = extras
+            .Where(extra => interfaceScan.Interfaces.All(local =>
+                !string.Equals(local.Cidr, extra.Cidr, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
         var skippedNetworks = interfaceScan.Messages.ToList();
-        var networks = interfaces.Select(item => item.Cidr).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToList();
+        var networks = interfaceScan.Interfaces.Select(item => item.Cidr)
+            .Concat(extras.Select(item => item.Cidr))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        if (interfaces.Count == 0)
+        if (interfaceScan.Interfaces.Count == 0 && extras.Count == 0)
         {
             if (skippedNetworks.Count == 0)
             {
@@ -152,7 +162,32 @@ public sealed class SkyQService : IDisposable
             return new SkyQScanResponse(networks, skippedNetworks, [], null);
         }
 
-        var candidates = await DiscoverCandidatesAsync(interfaces, cancellationToken);
+        var candidates = new HashSet<IPAddress>();
+        if (interfaceScan.Interfaces.Count > 0)
+        {
+            foreach (var address in await DiscoverCandidatesAsync(interfaceScan.Interfaces, cancellationToken))
+            {
+                candidates.Add(address);
+            }
+        }
+        else
+        {
+            skippedNetworks.Add("No local private NIC; scanning additional networks only.");
+        }
+
+        if (extraOnly.Count > 0)
+        {
+            var extraHosts = extraOnly.SelectMany(PrivateIpv4.EnumerateHosts);
+            foreach (var address in await PrivateIpv4.ProbeOpenTcpAsync(
+                         extraHosts,
+                         JsonPort,
+                         TimeSpan.FromMilliseconds(250),
+                         32,
+                         cancellationToken))
+            {
+                candidates.Add(address);
+            }
+        }
 
         var semaphore = new SemaphoreSlim(16);
         var tasks = candidates.Select(async address =>
@@ -174,18 +209,20 @@ public sealed class SkyQService : IDisposable
             .OrderBy(device => ToSortKey(device.Host))
             .ToList();
 
-        return new SkyQScanResponse(
-            networks,
-            candidates.Count == 0
-                ? [.. skippedNetworks, "No SSDP responders found on connected private interfaces."]
-                : skippedNetworks,
-            devices,
-            null);
+        if (candidates.Count == 0)
+        {
+            skippedNetworks.Add(extras.Count == 0
+                ? "No SSDP responders found on connected private interfaces."
+                : "No Sky Q JSON API found on connected or additional networks.");
+        }
+
+        return new SkyQScanResponse(networks, skippedNetworks, devices, null);
     }
 
     public async Task<SkyQCommandResult> SendCommandAsync(string host, string command, CancellationToken cancellationToken)
     {
-        if (!IPAddress.TryParse(host, out var address) || !IsPrivateAddress(address))
+        if (!IPAddress.TryParse(host, out var address) ||
+            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
         {
             return new SkyQCommandResult(false, host, command, "Sky Q control is limited to private IPv4 addresses.", []);
         }
@@ -323,7 +360,7 @@ public sealed class SkyQService : IDisposable
     }
 
     private async Task<HashSet<IPAddress>> DiscoverCandidatesAsync(
-        IReadOnlyList<PrivateInterface> interfaces,
+        IReadOnlyList<PrivateIpv4.PrivateInterface> interfaces,
         CancellationToken cancellationToken)
     {
         var discovered = new HashSet<IPAddress>();
@@ -377,13 +414,13 @@ public sealed class SkyQService : IDisposable
                     break;
                 }
 
-                if (IsPrivateAddress(response.RemoteEndPoint.Address))
+                if (PrivateIpv4.IsPrivateLike(response.RemoteEndPoint.Address))
                 {
                     results.Add(response.RemoteEndPoint.Address);
                 }
 
                 var location = TryGetLocationHost(Encoding.UTF8.GetString(response.Buffer));
-                if (location is not null && IsPrivateAddress(location))
+                if (location is not null && PrivateIpv4.IsPrivateLike(location))
                 {
                     results.Add(location);
                 }
@@ -423,169 +460,6 @@ public sealed class SkyQService : IDisposable
         return null;
     }
 
-    private PrivateInterfaceScanResult GetPrivateInterfaces()
-    {
-        var result = new List<PrivateInterface>();
-        var messages = new List<string>();
-        NetworkInterface[] networkInterfaces;
-
-        try
-        {
-            networkInterfaces = NetworkInterface.GetAllNetworkInterfaces();
-        }
-        catch (NetworkInformationException ex)
-        {
-            _logger.LogWarning(ex, "Sky Q scan could not enumerate local network interfaces.");
-            string? fallbackError = null;
-
-            if (OperatingSystem.IsLinux() && TryGetPrivateInterfacesFromLinuxIpCommand(out var fallbackInterfaces, out fallbackError))
-            {
-                _logger.LogInformation("Sky Q scan is using the Linux 'ip' command fallback for interface discovery.");
-                return new PrivateInterfaceScanResult(fallbackInterfaces, messages);
-            }
-
-            if (!string.IsNullOrWhiteSpace(fallbackError))
-            {
-                _logger.LogWarning("Linux 'ip' command fallback failed during Sky Q scan: {Message}", fallbackError);
-            }
-
-            messages.Add($"Unable to enumerate local network interfaces: {ex.Message}.");
-            return new PrivateInterfaceScanResult(result, messages);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Sky Q scan failed before interface enumeration completed.");
-            messages.Add($"Unable to inspect local network interfaces: {ex.Message}.");
-            return new PrivateInterfaceScanResult(result, messages);
-        }
-
-        foreach (var nic in networkInterfaces)
-        {
-            if (nic.OperationalStatus != OperationalStatus.Up ||
-                nic.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
-                nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
-            {
-                continue;
-            }
-
-            IPInterfaceProperties properties;
-            try
-            {
-                properties = nic.GetIPProperties();
-            }
-            catch (NetworkInformationException ex)
-            {
-                _logger.LogDebug(ex, "Skipping interface {InterfaceName} during Sky Q scan.", nic.Name);
-                messages.Add($"Skipped interface '{nic.Name}': {ex.Message}.");
-                continue;
-            }
-
-            foreach (var unicast in properties.UnicastAddresses)
-            {
-                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork ||
-                    unicast.IPv4Mask is null ||
-                    !IsPrivateAddress(unicast.Address))
-                {
-                    continue;
-                }
-
-                var cidr = BuildCidr(unicast.Address, unicast.IPv4Mask);
-                if (result.All(existing => !existing.Address.Equals(unicast.Address)))
-                {
-                    result.Add(new PrivateInterface(unicast.Address, cidr));
-                }
-            }
-        }
-
-        return new PrivateInterfaceScanResult(result, messages);
-    }
-
-    private static bool TryGetPrivateInterfacesFromLinuxIpCommand(
-        out List<PrivateInterface> interfaces,
-        out string? errorMessage)
-    {
-        interfaces = [];
-        errorMessage = null;
-
-        try
-        {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "ip",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-
-            process.StartInfo.ArgumentList.Add("-o");
-            process.StartInfo.ArgumentList.Add("-4");
-            process.StartInfo.ArgumentList.Add("addr");
-            process.StartInfo.ArgumentList.Add("show");
-            process.StartInfo.ArgumentList.Add("up");
-
-            if (!process.Start())
-            {
-                errorMessage = "Failed to start the Linux 'ip' command.";
-                return false;
-            }
-
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
-
-            if (!process.WaitForExit(3000))
-            {
-                process.Kill(entireProcessTree: true);
-                errorMessage = "Timed out while reading interface data from the Linux 'ip' command.";
-                return false;
-            }
-
-            if (process.ExitCode != 0)
-            {
-                errorMessage = string.IsNullOrWhiteSpace(error)
-                    ? $"The Linux 'ip' command exited with code {process.ExitCode}."
-                    : error.Trim();
-                return false;
-            }
-
-            foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (tokens.Length < 4 || !string.Equals(tokens[2], "inet", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var cidrParts = tokens[3].Split('/', StringSplitOptions.TrimEntries);
-                if (cidrParts.Length != 2 ||
-                    !IPAddress.TryParse(cidrParts[0], out var address) ||
-                    address.AddressFamily != AddressFamily.InterNetwork ||
-                    !int.TryParse(cidrParts[1], out var prefixLength) ||
-                    prefixLength < 0 ||
-                    prefixLength > 32 ||
-                    !IsPrivateAddress(address))
-                {
-                    continue;
-                }
-
-                if (interfaces.All(existing => !existing.Address.Equals(address)))
-                {
-                    interfaces.Add(new PrivateInterface(address, BuildCidr(address, prefixLength)));
-                }
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            return false;
-        }
-    }
-
     private static string? GetString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
@@ -593,17 +467,6 @@ public sealed class SkyQService : IDisposable
 
     private static bool GetBool(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.True;
-
-    private static bool IsPrivateAddress(IPAddress address)
-    {
-        var ipv4 = address.MapToIPv4();
-        var bytes = ipv4.GetAddressBytes();
-
-        return bytes.Length == 4 && (
-            bytes[0] == 10 ||
-            (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
-            (bytes[0] == 192 && bytes[1] == 168));
-    }
 
     private static uint ToSortKey(string host)
     {
@@ -639,58 +502,6 @@ public sealed class SkyQService : IDisposable
             return string.Empty;
         }
     }
-
-    private static string BuildCidr(IPAddress address, IPAddress mask)
-    {
-        var bytes = address.MapToIPv4().GetAddressBytes();
-        var maskBytes = mask.MapToIPv4().GetAddressBytes();
-        var network = new IPAddress(new[]
-        {
-            (byte)(bytes[0] & maskBytes[0]),
-            (byte)(bytes[1] & maskBytes[1]),
-            (byte)(bytes[2] & maskBytes[2]),
-            (byte)(bytes[3] & maskBytes[3])
-        });
-
-        var prefixLength = 0;
-        foreach (var maskByte in maskBytes)
-        {
-            var value = maskByte;
-            while (value != 0)
-            {
-                prefixLength += value & 1;
-                value >>= 1;
-            }
-        }
-
-        return $"{network}/{prefixLength}";
-    }
-
-    private static string BuildCidr(IPAddress address, int prefixLength)
-    {
-        var bytes = address.MapToIPv4().GetAddressBytes();
-        var ipValue = ((uint)bytes[0] << 24) |
-                      ((uint)bytes[1] << 16) |
-                      ((uint)bytes[2] << 8) |
-                      bytes[3];
-
-        var maskValue = prefixLength == 0
-            ? 0u
-            : uint.MaxValue << (32 - prefixLength);
-        var networkValue = ipValue & maskValue;
-        var network = new IPAddress(
-        [
-            (byte)((networkValue >> 24) & 0xff),
-            (byte)((networkValue >> 16) & 0xff),
-            (byte)((networkValue >> 8) & 0xff),
-            (byte)(networkValue & 0xff)
-        ]);
-
-        return $"{network}/{prefixLength}";
-    }
-
-    private sealed record PrivateInterface(IPAddress Address, string Cidr);
-    private sealed record PrivateInterfaceScanResult(IReadOnlyList<PrivateInterface> Interfaces, IReadOnlyList<string> Messages);
 
     private SkyQScanResponse LoadCachedScan()
     {

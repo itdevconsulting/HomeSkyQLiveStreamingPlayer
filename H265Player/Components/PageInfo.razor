@@ -416,7 +416,7 @@
         "If VLC plays the source but the browser fails, try HLS or managed FFmpeg instead of raw direct playback.",
         "If managed playback fails immediately, re-check the FFmpeg path in `Setup` and confirm the source URL is valid from the server host.",
         "If HLS playback stalls, toggle proxy rewrite and confirm the manifest, segments, and any key URLs are all reachable.",
-        "If Sky Q discovery is empty, confirm the app host can see the same private subnet as the box and that scanning is running from the right machine.",
+        "If Sky Q or Sky Stream discovery is empty, confirm the app host can reach the box subnet. Add that private CIDR under Additional subnets on Setup or the remote page, then scan again.",
         "If external login fails, confirm the authenticator enrollment was created from a trusted network and that the device time is correct."
     ];
 
@@ -473,6 +473,7 @@
             [
                 "Save a valid local `ffmpeg.exe` path first so managed playback has a working backend.",
                 "Set the default HTTP and RTSP source URLs if you want machine-local seed values on managed pages.",
+                "Add extra Sky Q / Sky Stream scan subnets if the box lives on a routed private network that is not on a local NIC.",
                 "Configure authenticator enrollment only from a trusted network or your dedicated unauthenticated edge-backed port.",
                 "Use the service restart controls if the installed Windows or Linux service needs to reconnect after a bad state."
             ],
@@ -513,6 +514,7 @@
             "Sky Q Remote" =>
             [
                 "Load the cached device list first, then force a scan only when discovery needs refreshing.",
+                "If the box is on a separate routed subnet, add that CIDR under Additional subnets before scanning.",
                 "Select a specific discovered box before sending any command.",
                 "Use the command log to confirm transport success versus logical command success.",
                 "Keep this page paired with a validated preset or player path once discovery is proven."
@@ -520,6 +522,7 @@
             "Sky Stream Remote" =>
             [
                 "Load the cached Stream box list first, then force a scan if mDNS or port 8091 discovery needs refreshing.",
+                "If the Stream box is on a separate routed subnet, add that CIDR under Additional subnets before scanning.",
                 "Select a specific discovered box before sending any command.",
                 "The first key press pairs and binds over mTLS. Later keys reuse that session.",
                 "If bind fails repeatedly, reboot the Sky Stream box because it can lock out failed authentication."

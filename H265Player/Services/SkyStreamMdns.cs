@@ -55,7 +55,7 @@ internal static class SkyStreamMdns
                     break;
                 }
 
-                if (!PrivateIpv4.IsPrivate(response.RemoteEndPoint.Address))
+                if (!PrivateIpv4.IsPrivateLike(response.RemoteEndPoint.Address))
                 {
                     continue;
                 }

@@ -9,7 +9,7 @@
         <div class="panel-copy">
             <p class="eyebrow">Sky Stream</p>
             <h1>Sky Stream Remote</h1>
-            <p class="lede">This page finds Sky Stream boxes on the local network using mDNS and port 8091, then sends keys over the official Sky Remote LAN protocol (mTLS WebSocket).</p>
+            <p class="lede">This page finds Sky Stream boxes on connected private subnets plus any additional networks you add, using mDNS and port 8091, then sends keys over the official Sky Remote LAN protocol (mTLS WebSocket).</p>
         </div>
         <PageInfo Title="Sky Stream Remote" Summary="Use this page to discover Sky Stream boxes on the local private network and send LAN remote-control commands." Items="HelpItems" />
     </div>
@@ -17,6 +17,8 @@
     <div class="toolbar">
         <button type="button" @onclick="() => ScanAsync(true)">Scan Private Network</button>
     </div>
+
+    <ScanNetworkEditor AutoSave="true" Saved="OnScanNetworksSaved" />
 
     <div class="status-grid">
         <div>
@@ -69,7 +71,7 @@
         {
             <div class="home-card">
                 <strong>No Sky Stream boxes yet</strong>
-                <span>Run the scan to look for `_rdk-rics._tcp` and TCP port 8091 on connected private subnets.</span>
+                <span>Run the scan to look for `_rdk-rics._tcp` and TCP port 8091 on connected private subnets plus any additional networks you have added.</span>
             </div>
         }
     </div>
@@ -132,7 +134,7 @@
     private static readonly IReadOnlyList<string> HelpItems =
     [
         "The page loads the cached Sky Stream box list on startup. It does not need to scan every time.",
-        "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private subnets.",
+        "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private subnets plus any additional networks you add.",
         "Select a discovered box before sending any remote command.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts."
@@ -203,6 +205,8 @@
         await ScanAsync(false);
         StateHasChanged();
     }
+
+    private Task OnScanNetworksSaved() => ScanAsync(true);
 
     private async Task ScanAsync(bool forceRefresh)
     {

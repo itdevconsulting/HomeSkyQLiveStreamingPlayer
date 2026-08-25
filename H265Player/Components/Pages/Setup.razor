@@ -20,7 +20,7 @@ else
         <div class="panel-copy">
             <p class="eyebrow">Setup</p>
             <h1>Configure FFmpeg</h1>
-            <p class="lede">Managed playback uses FFmpeg to normalize awkward streams, transcode RTSP sources, and generate browser-friendly HLS output. This page also enrolls the authenticator used when the app is accessed from an external network.</p>
+            <p class="lede">Managed playback uses FFmpeg to normalize awkward streams, transcode RTSP sources, and generate browser-friendly HLS output. This page also sets extra Sky Q / Sky Stream scan networks and enrolls the authenticator used from an external network.</p>
         </div>
         <PageInfo Title="Setup" Summary="Configure the local FFmpeg executable and optional machine defaults before using the managed playback pages." Items="HelpItems" />
     </div>
@@ -65,6 +65,12 @@ else
                    max="65535"
                    placeholder="5222" />
         </label>
+    </div>
+
+    <div class="setup-auth-grid">
+        <ScanNetworkEditor ExtraScanNetworks="Settings.ExtraScanNetworks"
+                           ExtraScanNetworksChanged="OnExtraScanNetworksChanged"
+                           DetectedScanNetworks="Settings.DetectedScanNetworks" />
     </div>
 
     <div class="toolbar">
@@ -155,6 +161,7 @@ else
         "Default RTSP URL is used as the starting value on the RTSP page when no machine-specific setting has been saved yet.",
         "The optional unauthenticated port is intended for a private origin sitting behind your own edge auth layer. It bypasses the app's own login completely.",
         "Automatically install GitHub updates queues the same Linux or Windows installer when Home finds a newer commit. Leave this off if you want to approve each update from the home page.",
+        "Additional scan networks let Sky Q and Sky Stream discovery reach a routed private subnet that is not on a local NIC, for example a UK-egress Sky Stream network. Use /22 to /32, or a single host.",
         "Listener changes are persisted in local-settings.json and only take effect after the service restarts.",
         "Authenticator enrollment is only allowed from a trusted network or a configured unauthenticated port. External access then requires the registered email address plus a current authenticator code.",
         "This data is stored locally on disk in local-settings.json and auth-settings.json and should stay out of source control."
@@ -212,16 +219,7 @@ else
         if (setupResponse.Ok && setupResponse.Json.ValueKind is not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null)
         {
             var parsedSetup = ParseLocalSetupSettings(setupResponse.Json);
-            Settings = new SetupForm
-            {
-                FfmpegPath = parsedSetup.FfmpegPath,
-                DefaultHttpStreamUrl = parsedSetup.DefaultHttpStreamUrl,
-                DefaultRtspStreamUrl = parsedSetup.DefaultRtspStreamUrl,
-                EnableUnauthenticatedPort = parsedSetup.EnableUnauthenticatedPort,
-                UnauthenticatedPort = parsedSetup.UnauthenticatedPort ?? 5222,
-                AutoUpdateEnabled = parsedSetup.AutoUpdateEnabled,
-                AuthEmail = _authStatus?.Email ?? string.Empty
-            };
+            Settings = ToForm(parsedSetup, _authStatus?.Email ?? string.Empty);
         }
         else
         {
@@ -261,7 +259,8 @@ else
                 DefaultRtspStreamUrl = Settings.DefaultRtspStreamUrl,
                 EnableUnauthenticatedPort = Settings.EnableUnauthenticatedPort,
                 UnauthenticatedPort = Settings.UnauthenticatedPort,
-                AutoUpdateEnabled = Settings.AutoUpdateEnabled
+                AutoUpdateEnabled = Settings.AutoUpdateEnabled,
+                ExtraScanNetworks = Settings.ExtraScanNetworks
             })
         });
         if (!response.Ok)
@@ -274,16 +273,7 @@ else
         if (response.Json.ValueKind is not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null)
         {
             var parsedSetup = ParseLocalSetupSettings(response.Json);
-            Settings = new SetupForm
-            {
-                FfmpegPath = parsedSetup.FfmpegPath,
-                DefaultHttpStreamUrl = parsedSetup.DefaultHttpStreamUrl,
-                DefaultRtspStreamUrl = parsedSetup.DefaultRtspStreamUrl,
-                EnableUnauthenticatedPort = parsedSetup.EnableUnauthenticatedPort,
-                UnauthenticatedPort = parsedSetup.UnauthenticatedPort ?? 5222,
-                AutoUpdateEnabled = parsedSetup.AutoUpdateEnabled,
-                AuthEmail = Settings.AuthEmail
-            };
+            Settings = ToForm(parsedSetup, Settings.AuthEmail);
         }
 
         StatusText = $"FFmpeg path: {Settings.FfmpegPath}";
@@ -427,6 +417,26 @@ else
             new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
         ?? new LocalSetupSettings();
 
+    private static SetupForm ToForm(LocalSetupSettings settings, string authEmail) =>
+        new()
+        {
+            FfmpegPath = settings.FfmpegPath,
+            DefaultHttpStreamUrl = settings.DefaultHttpStreamUrl,
+            DefaultRtspStreamUrl = settings.DefaultRtspStreamUrl,
+            EnableUnauthenticatedPort = settings.EnableUnauthenticatedPort,
+            UnauthenticatedPort = settings.UnauthenticatedPort ?? 5222,
+            AutoUpdateEnabled = settings.AutoUpdateEnabled,
+            ExtraScanNetworks = settings.ExtraScanNetworks.ToList(),
+            DetectedScanNetworks = settings.DetectedScanNetworks.ToList(),
+            AuthEmail = authEmail
+        };
+
+    private Task OnExtraScanNetworksChanged(IReadOnlyList<string> networks)
+    {
+        Settings.ExtraScanNetworks = networks.ToList();
+        return Task.CompletedTask;
+    }
+
     private sealed class SetupForm
     {
         public string FfmpegPath { get; set; } = string.Empty;
@@ -435,6 +445,8 @@ else
         public bool EnableUnauthenticatedPort { get; set; }
         public int? UnauthenticatedPort { get; set; } = 5222;
         public bool AutoUpdateEnabled { get; set; }
+        public List<string> ExtraScanNetworks { get; set; } = [];
+        public List<string> DetectedScanNetworks { get; set; } = [];
         public string AuthEmail { get; set; } = string.Empty;
     }
 

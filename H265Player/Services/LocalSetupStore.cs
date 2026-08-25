@@ -89,7 +89,9 @@ public sealed class LocalSetupStore
             DefaultRtspStreamUrl = settings.DefaultRtspStreamUrl.Trim(),
             EnableUnauthenticatedPort = settings.EnableUnauthenticatedPort,
             UnauthenticatedPort = NormalizePort(settings.UnauthenticatedPort) ?? 5222,
-            AutoUpdateEnabled = settings.AutoUpdateEnabled
+            AutoUpdateEnabled = settings.AutoUpdateEnabled,
+            ExtraScanNetworks = NormalizeExtraScanNetworks(settings.ExtraScanNetworks),
+            DetectedScanNetworks = []
         });
 
     private static LocalSetupSettings Empty() =>
@@ -104,6 +106,12 @@ public sealed class LocalSetupStore
 
         var detected = FfmpegPathResolver.TryDetect();
         return detected is null ? settings : settings with { FfmpegPath = detected };
+    }
+
+    private static IReadOnlyList<string> NormalizeExtraScanNetworks(IEnumerable<string>? values)
+    {
+        PrivateIpv4.TryNormalizeScanNetworks(values, out var networks, out _);
+        return networks;
     }
 
     private static int? NormalizePort(int? port) =>

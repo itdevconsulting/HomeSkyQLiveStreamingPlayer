@@ -100,7 +100,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
 
     private async Task ConnectAsync(CancellationToken cancellationToken)
     {
-        if (!IPAddress.TryParse(_host, out var address) || !PrivateIpv4.IsPrivate(address))
+        if (!IPAddress.TryParse(_host, out var address) || !PrivateIpv4.IsPrivateLike(address))
         {
             throw new InvalidOperationException("Sky Stream control is limited to private IPv4 addresses.");
         }

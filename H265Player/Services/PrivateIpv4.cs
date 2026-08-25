@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -7,14 +8,140 @@ namespace H265Player.Services;
 
 internal static class PrivateIpv4
 {
-    public static bool IsPrivate(IPAddress address)
+    public static bool IsPrivate(IPAddress address) => IsPrivateLike(address);
+
+    public static bool IsPrivateLike(IPAddress address)
     {
         var ipv4 = address.MapToIPv4();
         var bytes = ipv4.GetAddressBytes();
-        return bytes.Length == 4 && (
-            bytes[0] == 10 ||
-            (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
-            (bytes[0] == 192 && bytes[1] == 168));
+        if (bytes.Length != 4)
+        {
+            return false;
+        }
+
+        return bytes[0] == 10 ||
+               (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+               (bytes[0] == 192 && bytes[1] == 168) ||
+               (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127);
+    }
+
+    public static IReadOnlyList<string> DetectedCidrs() =>
+        GetInterfaces().Interfaces
+            .Select(item => item.Cidr)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    public static IReadOnlyList<string> NormalizeScanNetworks(IEnumerable<string>? values)
+    {
+        if (!TryNormalizeScanNetworks(values, out var networks, out var errors))
+        {
+            throw new InvalidOperationException(string.Join(' ', errors));
+        }
+
+        return networks;
+    }
+
+    public static bool TryNormalizeScanNetworks(
+        IEnumerable<string>? values,
+        out IReadOnlyList<string> networks,
+        out IReadOnlyList<string> errors)
+    {
+        var normalized = new List<string>();
+        var problems = new List<string>();
+        foreach (var raw in values ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            if (!TryParseCidr(raw, out var parsed, out var error))
+            {
+                problems.Add(error ?? $"'{raw.Trim()}' is not a valid IPv4 subnet.");
+                continue;
+            }
+
+            if (!normalized.Contains(parsed.Cidr, StringComparer.OrdinalIgnoreCase))
+            {
+                normalized.Add(parsed.Cidr);
+            }
+        }
+
+        networks = normalized.Order(StringComparer.OrdinalIgnoreCase).ToList();
+        errors = problems;
+        return problems.Count == 0;
+    }
+
+    public static bool TryParseCidr(string value, out PrivateInterface parsed, out string? error)
+    {
+        parsed = null!;
+        error = null;
+        var text = value.Trim();
+        var parts = text.Split('/', 2, StringSplitOptions.TrimEntries);
+        if (!IPAddress.TryParse(parts[0], out var address) || address.AddressFamily != AddressFamily.InterNetwork)
+        {
+            error = $"'{text}' must start with an IPv4 address.";
+            return false;
+        }
+
+        var prefix = 32;
+        if (parts.Length == 2 && (!int.TryParse(parts[1], out prefix) || prefix is < 0 or > 32))
+        {
+            error = $"'{text}' must use a prefix between 0 and 32.";
+            return false;
+        }
+
+        if (prefix < 22)
+        {
+            error = $"'{text}' is too large to scan. Use a prefix of /22 to /32, or a single host such as 10.8.0.10.";
+            return false;
+        }
+
+        if (!IsPrivateLike(address))
+        {
+            error = $"'{text}' must be a private, VPN, or Tailscale IPv4 subnet.";
+            return false;
+        }
+
+        var network = NetworkAddress(address, prefix);
+        parsed = new PrivateInterface(address, network, prefix, $"{network}/{prefix}");
+        return true;
+    }
+
+    public static IReadOnlyList<PrivateInterface> ExtraScanTargets(IEnumerable<string>? values)
+    {
+        var result = new List<PrivateInterface>();
+        foreach (var value in values ?? [])
+        {
+            if (TryParseCidr(value, out var parsed, out _))
+            {
+                result.Add(parsed);
+            }
+        }
+
+        return result;
+    }
+
+    public static bool Contains(PrivateInterface network, IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        var mask = network.PrefixLength == 0 ? 0u : uint.MaxValue << (32 - network.PrefixLength);
+        return (ToUInt32(address) & mask) == ToUInt32(network.Network);
+    }
+
+    public static bool IsAllowedTarget(IPAddress address, IEnumerable<string>? extraScanNetworks)
+    {
+        if (IsPrivateLike(address))
+        {
+            return true;
+        }
+
+        return ExtraScanTargets(extraScanNetworks).Any(network => Contains(network, address));
     }
 
     public static InterfaceScan GetInterfaces(ILogger? logger = null)
@@ -53,7 +180,7 @@ internal static class PrivateIpv4
         foreach (var nic in nics)
         {
             if (nic.OperationalStatus != OperationalStatus.Up ||
-                nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
+                nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
             {
                 continue;
             }
@@ -91,17 +218,69 @@ internal static class PrivateIpv4
 
     public static IEnumerable<IPAddress> EnumerateHosts(PrivateInterface iface)
     {
-        if (iface.PrefixLength is < 22 or > 30)
+        if (iface.PrefixLength is < 22 or > 32)
         {
             yield break;
         }
 
-        var hostCount = (1 << (32 - iface.PrefixLength)) - 2;
         var networkValue = ToUInt32(iface.Network);
+        if (iface.PrefixLength == 32)
+        {
+            yield return iface.Network;
+            yield break;
+        }
+
+        var hostCount = (1 << (32 - iface.PrefixLength)) - 2;
+        if (hostCount <= 0)
+        {
+            yield return FromUInt32(networkValue);
+            yield return FromUInt32(networkValue + 1);
+            yield break;
+        }
+
         for (var i = 1; i <= hostCount; i++)
         {
             yield return FromUInt32(networkValue + (uint)i);
         }
+    }
+
+    public static async Task<IReadOnlyList<IPAddress>> ProbeOpenTcpAsync(
+        IEnumerable<IPAddress> hosts,
+        int port,
+        TimeSpan timeout,
+        int concurrency,
+        CancellationToken cancellationToken)
+    {
+        var unique = hosts.Distinct().ToList();
+        if (unique.Count == 0)
+        {
+            return [];
+        }
+
+        var found = new ConcurrentBag<IPAddress>();
+        using var gate = new SemaphoreSlim(Math.Max(1, concurrency));
+        var tasks = unique.Select(async address =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                using var client = new TcpClient();
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(timeout);
+                await client.ConnectAsync(address, port, cts.Token);
+                found.Add(address);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+        return found.ToList();
     }
 
     private static bool TryGetFromLinuxIp(out List<PrivateInterface> interfaces, out string? errorMessage)

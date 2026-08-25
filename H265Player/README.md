@@ -33,7 +33,7 @@ The solution is intended to work with:
 - Sky Q main boxes
 - Sky Q mini boxes
 
-Sky Q discovery and remote-control behavior is based on the local network APIs/protocols exposed by the boxes.
+Sky Q discovery and remote-control behavior is based on the local network APIs/protocols exposed by the boxes. If a box sits on a routed private subnet that is not on a local NIC, add that CIDR on Setup or the Sky Q / Sky Stream pages.
 
 ## Streaming Support
 

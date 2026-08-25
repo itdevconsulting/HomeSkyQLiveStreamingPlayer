@@ -207,8 +207,9 @@ app.MapGet("/hls-proxy/playlist", HlsPlaylistProxyAsync);
 app.MapMethods("/hls-proxy/media", ["GET", "HEAD"], ProxyStreamAsync);
 app.MapMethods("/live/{**filePath}", ["GET", "HEAD"], (HttpContext context, IWebHostEnvironment environment, string? filePath) =>
     ServeLiveAssetAsync(context, environment, mediaTypes, filePath));
-app.MapGet("/api/setup", (LocalSetupStore store) => Results.Ok(store.Get()));
+app.MapGet("/api/setup", GetLocalSetup);
 app.MapPost("/api/setup", SaveLocalSetupAsync);
+app.MapPost("/api/setup/scan-networks", SaveScanNetworksAsync);
 app.MapGet("/api/service/status", GetServiceRestartStatusAsync);
 app.MapPost("/api/service/restart", RestartServiceAsync);
 app.MapGet("/api/update/status", GetAppUpdateStatusAsync);
@@ -285,6 +286,9 @@ static async Task<IResult> StartTranscoderAsync(
     return Results.Ok(manager.GetStatus());
 }
 
+static IResult GetLocalSetup(LocalSetupStore store) =>
+    Results.Ok(WithDetectedScanNetworks(store.Get()));
+
 static async Task<IResult> SaveLocalSetupAsync(
     LocalSetupSettings settings,
     HttpContext httpContext,
@@ -303,13 +307,20 @@ static async Task<IResult> SaveLocalSetupAsync(
         return Results.BadRequest("FFmpeg path is required.");
     }
 
+    if (!PrivateIpv4.TryNormalizeScanNetworks(settings.ExtraScanNetworks, out var extraScanNetworks, out var scanNetworkErrors))
+    {
+        return Results.BadRequest(string.Join(' ', scanNetworkErrors));
+    }
+
     try
     {
         var resolved = FfmpegPathResolver.ResolveOrThrow(settings.FfmpegPath.Trim());
         var normalized = settings with
         {
             FfmpegPath = resolved,
-            UnauthenticatedPort = NormalizeOptionalPort(settings.UnauthenticatedPort)
+            UnauthenticatedPort = NormalizeOptionalPort(settings.UnauthenticatedPort),
+            ExtraScanNetworks = extraScanNetworks,
+            DetectedScanNetworks = []
         };
         var portValidationError = ValidateUnauthenticatedPort(normalized, httpContext, accessOptions);
         if (portValidationError is not null)
@@ -320,7 +331,7 @@ static async Task<IResult> SaveLocalSetupAsync(
         await ValidateOptionalUrlAsync(normalized.DefaultHttpStreamUrl, cancellationToken);
         await ValidateOptionalUrlAsync(normalized.DefaultRtspStreamUrl, cancellationToken);
         await store.SaveAsync(normalized, cancellationToken);
-        return Results.Ok(store.Get());
+        return Results.Ok(WithDetectedScanNetworks(store.Get()));
     }
     catch (FileNotFoundException ex)
     {
@@ -331,6 +342,32 @@ static async Task<IResult> SaveLocalSetupAsync(
         return Results.BadRequest(ex.Message);
     }
 }
+
+static async Task<IResult> SaveScanNetworksAsync(
+    ScanNetworksRequest request,
+    HttpContext httpContext,
+    TrustedNetworkService trustedNetworkService,
+    AccessOptions accessOptions,
+    LocalSetupStore store,
+    CancellationToken cancellationToken)
+{
+    if (!HasPrivilegedAccess(httpContext, trustedNetworkService, accessOptions))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    if (!PrivateIpv4.TryNormalizeScanNetworks(request.ExtraScanNetworks, out var extraScanNetworks, out var scanNetworkErrors))
+    {
+        return Results.BadRequest(string.Join(' ', scanNetworkErrors));
+    }
+
+    var current = store.Get();
+    await store.SaveAsync(current with { ExtraScanNetworks = extraScanNetworks }, cancellationToken);
+    return Results.Ok(WithDetectedScanNetworks(store.Get()));
+}
+
+static LocalSetupSettings WithDetectedScanNetworks(LocalSetupSettings settings) =>
+    settings with { DetectedScanNetworks = PrivateIpv4.DetectedCidrs() };
 
 static IResult GetServiceRestartStatusAsync(
     HttpContext httpContext,
