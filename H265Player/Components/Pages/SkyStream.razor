@@ -121,12 +121,12 @@
             <input type="text"
                    @bind="TestHost"
                    spellcheck="false"
-                   placeholder="192.168.80.147"
+                   placeholder="192.168.2.21"
                    autocomplete="off" />
         </label>
         <button type="button" @onclick="SendHomeProbeAsync" disabled="@IsBusy">Send Home</button>
     </div>
-    <p class="lede">Send Home runs the real Sky Remote pair, bind, and Home key against this IP (or the selected box if the field is empty). If nmap shows 8091 filtered from this host, move the service onto the puck’s subnet.</p>
+    <p class="lede">Send Home runs the real Sky Remote pair, bind, and Home key against this IP (or the selected box if the field is empty). If nmap shows 8091 filtered, wake the puck on this LAN until the port is open.</p>
 
     <div class="control-grid skyq-remote-grid">
         @foreach (var command in PrimaryCommands)
@@ -167,7 +167,7 @@
         "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private NICs.",
         "Select a discovered box before sending any remote command.",
         "Wake puck is optional. If you already woke the box another way, just send keys.",
-        "Send Home runs the real Sky Remote pair/bind/Home sequence. nmap 8091/tcp filtered from this host means move the install onto the puck’s subnet.",
+        "Send Home runs the real Sky Remote pair/bind/Home sequence. nmap 8091/tcp filtered means the puck is still not offering Sky Remote — wake it on the LAN until that port is open.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts."
     ];

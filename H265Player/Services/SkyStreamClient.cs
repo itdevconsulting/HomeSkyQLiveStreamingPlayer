@@ -126,7 +126,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
             _tcp = null;
             throw new InvalidOperationException(
                 $"TCP {_host}:{_port} did not connect in 8s ({ex.GetType().Name}: {ex.Message}). " +
-                "Sky Stream remote needs this host on the puck’s subnet. nmap 8091/tcp filtered means ping works while Sky Remote TCP is dropped — move the service onto that LAN.",
+                "nmap 8091/tcp filtered means the box can ping while Sky Remote is still down. If you are already on the same LAN, wake the puck with the Sky remote until 8091 is open. A Tailscale route that only forwards ping looks the same.",
                 ex);
         }
 
