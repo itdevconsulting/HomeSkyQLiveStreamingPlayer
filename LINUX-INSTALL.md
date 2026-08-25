@@ -131,6 +131,12 @@ Cloudflare Zero Trust / Tailscale:
 - for Cloudflare, point the private origin/tunnel at `http://127.0.0.1:5221`
 - if you enable `UNAUTHENTICATED_PORT`, point your edge at that second port instead and let the edge own authentication
 
+Sky Stream LAN:
+
+- install this service on a host that has a NIC on the Sky Stream puck’s subnet
+- Tailscale is for opening the browser UI, not for Sky Remote TCP 8091
+- `nmap -Pn -sT -p 8091 <puck-ip>` from the service host must show `open`, not `filtered`
+
 Source checkout used by the bootstrap installer:
 
 ```text

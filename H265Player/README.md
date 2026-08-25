@@ -169,7 +169,7 @@ This project builds on, or was directly informed by, the following upstream proj
 ### Sky Stream Control
 
 - `sky_stream_remote`
-  - The Sky Stream remote uses the reverse-engineered Sky Remote LAN protocol documented here (mDNS `_rdk-rics._tcp`, mTLS WebSocket on port 8091).
+  - The Sky Stream remote uses the reverse-engineered Sky Remote LAN protocol documented here (mDNS `_rdk-rics._tcp`, mTLS WebSocket on port 8091). The service host must be on the puck’s subnet; Tailscale subnet routing is not a substitute for TCP 8091.
   - Upstream: https://github.com/jatatech/sky_stream_remote
 
 ## Notes

@@ -522,7 +522,7 @@
             "Sky Stream Remote" =>
             [
                 "Load the cached Stream box list first, then force a scan if mDNS or port 8091 discovery needs refreshing.",
-                "If the Stream box is on a separate routed subnet, add that CIDR under Additional subnets before scanning.",
+                "Install this service on the puck’s own subnet. A Tailscale subnet route that only forwards ping will not open TCP 8091.",
                 "Wake puck is optional if the box is already awake. Select it and send keys.",
                 "Select a specific discovered box before sending any command.",
                 "The first key press pairs and binds over mTLS. Later keys reuse that session.",

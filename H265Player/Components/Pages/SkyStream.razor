@@ -9,7 +9,7 @@
         <div class="panel-copy">
             <p class="eyebrow">Sky Stream</p>
             <h1>Sky Stream Remote</h1>
-            <p class="lede">This page finds Sky Stream boxes on connected private subnets plus any additional networks you add, using mDNS and port 8091, then sends keys over the official Sky Remote LAN protocol (mTLS WebSocket).</p>
+            <p class="lede">Sky Stream remote uses TCP 8091 on the puck’s LAN. Install this service on a machine that has a NIC on that subnet. You can still open the browser UI over Tailscale; the control session itself cannot cross a ping-only route.</p>
         </div>
         <PageInfo Title="Sky Stream Remote" Summary="Use this page to discover Sky Stream boxes on the local private network and send LAN remote-control commands." Items="HelpItems" />
     </div>
@@ -71,7 +71,7 @@
         {
             <div class="home-card">
                 <strong>No Sky Stream boxes yet</strong>
-                <span>Run the scan to look for `_rdk-rics._tcp` and TCP port 8091 on connected private subnets plus any additional networks you have added.</span>
+                <span>Run the scan from a host on the puck’s subnet. It looks for `_rdk-rics._tcp` and open TCP port 8091 on local private NICs.</span>
             </div>
         }
     </div>
@@ -81,7 +81,7 @@
     <div class="panel-copy">
         <p class="eyebrow">Remote</p>
         <h2>@(SelectedDevice is null ? "No device selected" : string.IsNullOrWhiteSpace(SelectedDevice.DisplayName) ? "Sky Stream" : SelectedDevice.DisplayName)</h2>
-        <p class="lede">Choose a discovered box above, then send keys. The first command pairs and binds the session. Wake puck is optional if the box is in standby.</p>
+        <p class="lede">Choose a discovered box on this LAN, then send keys. The first command pairs and binds the session. Wake puck is optional if the box is in standby.</p>
     </div>
 
     <div class="status-grid">
@@ -126,7 +126,7 @@
         </label>
         <button type="button" @onclick="SendHomeProbeAsync" disabled="@IsBusy">Send Home</button>
     </div>
-    <p class="lede">Send Home runs the real Sky Remote pair, bind, and Home key against this IP (or the selected box if the field is empty). Use it to confirm 8091 is reachable from this service, not only that the puck pings.</p>
+    <p class="lede">Send Home runs the real Sky Remote pair, bind, and Home key against this IP (or the selected box if the field is empty). If nmap shows 8091 filtered from this host, move the service onto the puck’s subnet.</p>
 
     <div class="control-grid skyq-remote-grid">
         @foreach (var command in PrimaryCommands)
@@ -163,11 +163,11 @@
     private static readonly IReadOnlyList<string> HelpItems =
     [
         "The page loads the cached Sky Stream box list on startup. It does not need to scan every time.",
-        "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private subnets plus any additional networks you add.",
+        "This service must share a subnet with the puck (a local NIC on that LAN). Tailscale is for reaching the web UI, not for Sky Remote TCP 8091.",
+        "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private NICs.",
         "Select a discovered box before sending any remote command.",
         "Wake puck is optional. If you already woke the box another way, just send keys.",
-        "Send Home runs the real Sky Remote pair/bind/Home sequence against the test IP or the selected box. Use it to confirm 8091 is reachable from the machine running this service.",
-        "nmap 8091/tcp filtered means the puck answers ping while Sky Remote TCP is still dropped. Home cannot be sent until that port is open from this host.",
+        "Send Home runs the real Sky Remote pair/bind/Home sequence. nmap 8091/tcp filtered from this host means move the install onto the puck’s subnet.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts."
     ];

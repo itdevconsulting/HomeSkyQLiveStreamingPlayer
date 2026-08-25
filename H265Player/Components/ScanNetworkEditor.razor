@@ -4,7 +4,7 @@
     <div class="scan-networks-copy">
         <p class="eyebrow">Scan networks</p>
         <h2>Sky Q and Sky Stream discovery</h2>
-        <p class="lede">Connected private, VPN, and Tailscale subnets are scanned automatically. Add extra IPv4 subnets that this machine can route to but does not have a local address on, such as a UK-egress Sky Stream network.</p>
+        <p class="lede">Connected private, VPN, and Tailscale NICs are scanned automatically. Extra CIDRs help Sky Q when TCP 9006 actually routes. Sky Stream remote needs this service on the puck’s own subnet — ping over a Tailscale subnet route is not enough.</p>
     </div>
 
     <div class="scan-networks-group">

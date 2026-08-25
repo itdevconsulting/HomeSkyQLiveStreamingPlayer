@@ -600,7 +600,7 @@ public sealed class SkyStreamService : IDisposable
             }
             else if (pingable)
             {
-                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} stayed closed or filtered after Wake-on-LAN. ICMP through Tailscale is not enough; the subnet route must forward TCP 8091.");
+                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} stayed closed or filtered after Wake-on-LAN. Put this service on the puck’s subnet. Tailscale subnet routes usually forward ICMP and drop TCP 8091.");
             }
             else
             {

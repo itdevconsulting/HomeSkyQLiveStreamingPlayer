@@ -6,6 +6,8 @@ FFmpeg is included in the image. Settings, authenticator enrolment, presets, and
 
 Sky Q discovery and remote control need to see your LAN, so **host networking is required**. Docker Desktop on macOS cannot do that the same way; use a Linux host, Home Assistant OS, or a Linux VM.
 
+Sky Stream remote is stricter: the container host must have a NIC on the puck’s subnet. TCP 8091 does not work over a Tailscale subnet route that only forwards ping. Put Tailscale in front of the web UI, not between this container and the puck.
+
 Container installs are updated by pulling a newer image or rebuilding the add-on. The in-app GitHub installer path is for systemd/Windows installs only.
 
 ## Docker Compose

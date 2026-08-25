@@ -126,7 +126,7 @@
         </a>
         <a class="home-card" href="/skystream">
             <strong>Sky Stream</strong>
-            <span>Discover Sky Stream boxes and control them with the Sky Remote LAN protocol (mTLS WebSocket on port 8091).</span>
+            <span>Control Sky Stream pucks on the same LAN as this service (mTLS WebSocket on port 8091). Open the UI over Tailscale; keep the service on the puck’s subnet.</span>
         </a>
         <a class="home-card" href="/presets">
             <strong>Presets</strong>
@@ -147,7 +147,7 @@
         "HLS is the straightforward browser page for .m3u8 playback with optional proxy rewriting.",
         "Engines is the comparison page for trying different browser player libraries against the same stream.",
         "Sky Q is separate from video playback. It scans the local private network for Sky Q boxes and exposes remote control buttons.",
-        "Sky Stream is the same idea for Stream boxes: mDNS plus the Sky Remote LAN protocol on port 8091."
+        "Sky Stream is the same idea for Stream boxes, but TCP 8091 is LAN-local: put this service on the puck’s subnet and use Tailscale only to reach the web UI."
     ];
 
     private string AccessStatus { get; set; } = "Loading";
