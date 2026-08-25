@@ -54,7 +54,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         Log("Sending Bind Request.");
         await BindAsync(pairingCode, stbNonce, cancellationToken);
         Log($"Bound bind_id={_bindId}. Waiting for the box to accept keys.");
-        await DrainIncomingAsync(TimeSpan.FromMilliseconds(750), cancellationToken);
+        await Task.Delay(400, cancellationToken);
         Log("Session ready.");
     }
 
@@ -194,42 +194,6 @@ internal sealed class SkyStreamClient : IAsyncDisposable
     }
 
     private void Log(string message) => _log?.Invoke(message);
-
-    private async Task DrainIncomingAsync(TimeSpan window, CancellationToken cancellationToken)
-    {
-        if (_socket is not { State: WebSocketState.Open })
-        {
-            return;
-        }
-
-        var deadline = DateTime.UtcNow + window;
-        var chunk = new byte[8192];
-        while (DateTime.UtcNow < deadline)
-        {
-            using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var remaining = deadline - DateTime.UtcNow;
-            if (remaining <= TimeSpan.Zero)
-            {
-                break;
-            }
-
-            waitCts.CancelAfter(remaining);
-            try
-            {
-                var result = await _socket.ReceiveAsync(chunk, waitCts.Token);
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    throw new InvalidOperationException("Sky Stream closed the WebSocket after bind.");
-                }
-
-                Log("Ignored extra message after bind.");
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-        }
-    }
 
     private async Task<JsonElement> PairAsync(CancellationToken cancellationToken)
     {

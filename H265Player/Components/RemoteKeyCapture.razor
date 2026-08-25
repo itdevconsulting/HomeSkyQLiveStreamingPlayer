@@ -13,16 +13,22 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        try
         {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("h265App.enablePageRemoteKeys", _dotNetRef);
-            _started = true;
-        }
+            if (firstRender)
+            {
+                _dotNetRef = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("h265App.enablePageRemoteKeys", _dotNetRef);
+                _started = true;
+            }
 
-        if (_started)
+            if (_started)
+            {
+                await JS.InvokeVoidAsync("h265App.setPageRemoteKeysEnabled", Enabled);
+            }
+        }
+        catch
         {
-            await JS.InvokeVoidAsync("h265App.setPageRemoteKeysEnabled", Enabled);
         }
     }
 

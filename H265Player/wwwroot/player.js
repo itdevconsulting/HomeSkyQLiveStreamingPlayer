@@ -1010,7 +1010,6 @@ window.h265App = {
             }
 
             event.preventDefault();
-            event.stopPropagation();
             this._pageRemoteKeysRef?.invokeMethodAsync("HandlePageKey", event.key, !!event.shiftKey);
         };
         window.addEventListener("keydown", this._pageRemoteKeysHandler, true);
