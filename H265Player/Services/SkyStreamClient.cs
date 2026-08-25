@@ -66,7 +66,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         await SendJsonAsync(new Dictionary<string, object?>
         {
             ["command_name"] = "Key Command Request",
-            ["tid"] = _tid,
+            ["tid"] = Guid.NewGuid().ToString(),
             ["authtoken"] = _authToken,
             ["bind_id"] = _bindId,
             ["cmd"] = "keyatomic",

@@ -47,6 +47,8 @@ public sealed class SkyStreamService : IDisposable
     };
 
     private readonly SemaphoreSlim _scanLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _commandLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _nextKeyAt = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<Task<SkyStreamClient>>> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _cachePath;
     private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
@@ -54,6 +56,8 @@ public sealed class SkyStreamService : IDisposable
     private readonly LocalSetupStore _setupStore;
     private SkyStreamScanResponse _cachedScan;
     private DateTimeOffset? _lastScanAt;
+    private static readonly TimeSpan DigitKeyGap = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan OtherKeyGap = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromHours(1);
 
     public SkyStreamService(IHostEnvironment environment, LocalSetupStore setupStore, ILogger<SkyStreamService> logger)
@@ -117,9 +121,24 @@ public sealed class SkyStreamService : IDisposable
             $"Key={key}"
         };
 
+        var hostKey = host.Trim();
+        var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
         try
         {
-            var response = await SendKeyWithRetryAsync(host.Trim(), key, logs, cancellationToken);
+            var gap = command.Length == 1 && char.IsDigit(command[0]) ? DigitKeyGap : OtherKeyGap;
+            if (_nextKeyAt.TryGetValue(hostKey, out var next))
+            {
+                var wait = next - Environment.TickCount64;
+                if (wait > 0)
+                {
+                    logs.Add($"Spacing {wait}ms before {command}.");
+                    await Task.Delay((int)Math.Min(wait, (long)gap.TotalMilliseconds), cancellationToken);
+                }
+            }
+
+            var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
+            _nextKeyAt[hostKey] = Environment.TickCount64 + (long)gap.TotalMilliseconds;
             var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
             logs.Add(ok ? "Key accepted." : $"Box response: {response}");
             return new SkyQCommandResult(ok, host, command, ok ? "Command sent." : "Sky Stream rejected the key.", logs);
@@ -128,6 +147,10 @@ public sealed class SkyStreamService : IDisposable
         {
             logs.Add($"{ex.GetType().Name}: {ex.Message}");
             return new SkyQCommandResult(false, host, command, ex.Message, logs);
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
@@ -641,5 +664,9 @@ public sealed class SkyStreamService : IDisposable
         }
 
         _scanLock.Dispose();
+        foreach (var gate in _commandLocks.Values)
+        {
+            gate.Dispose();
+        }
     }
 }

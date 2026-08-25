@@ -1,5 +1,5 @@
 name: Home Sky Q Player
-version: "2026.8.25.17.15"
+version: "2026.8.25.17.25"
 slug: skyq_player
 description: Watch and control your own Sky Q box from Home Assistant using your local HDMI encoder.
 url: https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer
