@@ -318,7 +318,8 @@
         "Low-latency",
         "Authenticator protected",
         "Personal use only",
-        "Sky Q remote included"
+        "Sky Q remote included",
+        "Sky Stream remote included"
     ];
 
     private static readonly IReadOnlyList<string> AboutPlaybackItems =
@@ -331,15 +332,15 @@
 
     private static readonly IReadOnlyList<string> AboutControlItems =
     [
-        "Built-in Sky Q discovery and LAN remote control.",
+        "Built-in Sky Q and Sky Stream discovery and LAN remote control.",
         "Trusted local setup plus authenticator-based external access.",
-        "Saved presets that bind a stream source to a specific Sky Q box.",
+        "Saved presets that bind a stream source to a specific Sky Q or Sky Stream box.",
         "Linux install scripts for bootstrap, updates, and service re-runs."
     ];
 
     private static readonly IReadOnlyList<string> AboutHowItWorks =
     [
-        "A Sky Q box is connected to a local HDMI encoder.",
+        "A Sky Q or Sky Stream box is connected to a local HDMI encoder.",
         "The encoder exposes a stream such as HLS, MPEG-TS, or RTSP.",
         "This app either plays that stream directly in the browser or normalizes it through FFmpeg first.",
         "You access the app through your own deployment, typically behind Tailscale or Cloudflare Zero Trust."
@@ -516,6 +517,13 @@
                 "Use the command log to confirm transport success versus logical command success.",
                 "Keep this page paired with a validated preset or player path once discovery is proven."
             ],
+            "Sky Stream Remote" =>
+            [
+                "Load the cached Stream box list first, then force a scan if mDNS or port 8091 discovery needs refreshing.",
+                "Select a specific discovered box before sending any command.",
+                "The first key press pairs and binds over mTLS. Later keys reuse that session.",
+                "If bind fails repeatedly, reboot the Sky Stream box because it can lock out failed authentication."
+            ],
             "Presets" =>
             [
                 "Create presets only after the underlying stream path is already working.",
@@ -573,13 +581,19 @@
             "Sky Q Remote" =>
             [
                 "Switch to `Presets` when you want a saved player-plus-box pairing.",
-                "Switch to `Home` if discovery works and the next task is validating playback.",
+                "Switch to `Sky Stream Remote` if the box is a Stream puck rather than Sky Q.",
+                "Switch to a player page if the box works but the stream path still needs tuning."
+            ],
+            "Sky Stream Remote" =>
+            [
+                "Switch to `Presets` when you want a saved player-plus-box pairing.",
+                "Switch to `Sky Q Remote` if the box is a Sky Q receiver rather than Stream.",
                 "Switch to a player page if the box works but the stream path still needs tuning."
             ],
             _ =>
             [
                 "Use `Setup` for FFmpeg path and external login enrollment.",
-                "Use `Sky Q Remote` for box discovery and LAN control.",
+                "Use `Sky Q Remote` or `Sky Stream Remote` for box discovery and LAN control.",
                 "Use `Presets` when you are done experimenting and want repeatable launches."
             ]
         };

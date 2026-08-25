@@ -8,6 +8,7 @@ auth-settings.json
 transcoder-settings.json
 direct-skyq-presets.json
 skyq-cache.json
+sky-stream-cache.json
 .vs/
 .idea/
 *.user

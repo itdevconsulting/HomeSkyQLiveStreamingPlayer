@@ -1,6 +1,7 @@
 @page "/presets"
 @inject DirectSkyQPresetStore PresetStore
 @inject SkyQService SkyQService
+@inject SkyStreamService SkyStreamService
 @inject NavigationManager NavigationManager
 
 <PageTitle>Presets</PageTitle>
@@ -9,10 +10,10 @@
     <div class="panel-head">
         <div class="panel-copy">
             <p class="eyebrow">Presets</p>
-            <h1>Stream + Sky Q Presets</h1>
-            <p class="lede">Create named presets that combine a saved stream source with a Sky Q box. Use Save As Preset from Direct, FFmpeg, RTSP, or HLS to prefill this screen.</p>
+            <h1>Stream + Box Presets</h1>
+            <p class="lede">Create named presets that combine a saved stream source with a Sky Q or Sky Stream box. Use Save As Preset from Direct, FFmpeg, RTSP, or HLS to prefill this screen.</p>
         </div>
-        <PageInfo Title="Presets" Summary="Use this page to save named shortcuts that combine a stream source with a specific Sky Q box." Items="HelpItems" />
+        <PageInfo Title="Presets" Summary="Use this page to save named shortcuts that combine a stream source with a specific Sky Q or Sky Stream box." Items="HelpItems" />
     </div>
 
     <div class="control-grid">
@@ -37,14 +38,12 @@
         </label>
 
         <label class="field">
-            <span>Sky Q box</span>
-            <select value="@Editor.SkyQHost" @onchange="OnDeviceChanged">
-                <option value="">Select Sky Q box</option>
+            <span>Box</span>
+            <select value="@SelectedBoxValue" @onchange="OnDeviceChanged">
+                <option value="">Select Sky Q or Sky Stream box</option>
                 @foreach (var device in Devices)
                 {
-                    <option value="@device.Host">
-                        @(string.IsNullOrWhiteSpace(device.HostName) ? device.Host : $"{device.HostName} ({device.Host})")
-                    </option>
+                    <option value="@device.Value">@device.Label</option>
                 }
             </select>
         </label>
@@ -128,7 +127,7 @@
     <div class="toolbar">
         <button type="button" @onclick="SaveAsync">Save preset</button>
         <button type="button" @onclick="ResetEditor">New preset</button>
-        <button type="button" @onclick="ScanBoxesAsync">Refresh Sky Q boxes</button>
+        <button type="button" @onclick="ScanBoxesAsync">Refresh boxes</button>
     </div>
 
     <div class="status-grid">
@@ -168,7 +167,7 @@
                     <strong>@preset.Name</strong>
                     <span>@preset.SourceType.ToUpperInvariant()</span>
                     <span>@preset.StreamUrl</span>
-                    <span>@(string.IsNullOrWhiteSpace(preset.SkyQHostName) ? preset.SkyQHost : $"{preset.SkyQHostName} ({preset.SkyQHost})")</span>
+                    <span>@(BoxCaption(preset))</span>
                     <div class="toolbar">
                         <button type="button" @onclick="() => EditPreset(preset)">Edit</button>
                         <button type="button" @onclick="() => OpenPreset(preset.Id)">Open</button>
@@ -184,7 +183,7 @@
     private static readonly IReadOnlyList<string> HelpItems =
     [
         "Use Save As Preset from Direct, FFmpeg, RTSP, or HLS to open this page with the current source already filled in.",
-        "Choose the Sky Q box that should be associated with that saved stream.",
+        "Choose the Sky Q or Sky Stream box that should be associated with that saved stream.",
         "FFmpeg and RTSP presets also store the codec, preset, audio, and autoplay/restart options needed to recreate the stream path.",
         "Direct and HLS presets can auto-reopen the browser player when playback stalls, with per-preset poll and timeout values.",
         "HLS presets also store whether the HLS proxy rewrite should be used.",
@@ -225,17 +224,20 @@
     private int? WatchdogStallSecondsQuery { get; set; }
 
     private List<DirectSkyQPreset> SavedPresets { get; set; } = [];
-    private List<SkyQDevice> Devices { get; set; } = [];
+    private List<BoxChoice> Devices { get; set; } = [];
     private EditorModel Editor { get; set; } = new();
     private string Status { get; set; } = "Idle";
     private string? _lastPrefillKey;
 
+    private string SelectedBoxValue =>
+        string.IsNullOrWhiteSpace(Editor.SkyQHost)
+            ? string.Empty
+            : $"{Editor.RemoteKind}|{Editor.SkyQHost}";
+
     private string SelectedBoxText =>
         string.IsNullOrWhiteSpace(Editor.SkyQHost)
             ? "None"
-            : string.IsNullOrWhiteSpace(Editor.SkyQHostName)
-                ? Editor.SkyQHost
-                : $"{Editor.SkyQHostName} ({Editor.SkyQHost})";
+            : BoxCaption(Editor.RemoteKind, Editor.SkyQHostName, Editor.SkyQHost, Editor.SkyQModel);
 
     protected override async Task OnInitializedAsync()
     {
@@ -290,14 +292,29 @@
 
     private async Task LoadDevicesAsync(bool force)
     {
-        var scan = await SkyQService.GetScanAsync(force, CancellationToken.None);
-        Devices = scan.Devices.ToList();
+        var skyq = await SkyQService.GetScanAsync(force, CancellationToken.None);
+        var stream = await SkyStreamService.GetScanAsync(force, CancellationToken.None);
+        Devices =
+        [
+            .. skyq.Devices.Select(device => new BoxChoice(
+                SkyRemoteKinds.SkyQ,
+                device.Host,
+                BoxCaption(SkyRemoteKinds.SkyQ, device.HostName, device.Host, device.Model),
+                device.HostName,
+                device.Model)),
+            .. stream.Devices.Select(device => new BoxChoice(
+                SkyRemoteKinds.SkyStream,
+                device.Host,
+                BoxCaption(SkyRemoteKinds.SkyStream, device.DisplayName, device.Host, "Sky Stream"),
+                device.DisplayName,
+                "Sky Stream"))
+        ];
     }
 
     private async Task ScanBoxesAsync()
     {
         await LoadDevicesAsync(true);
-        Status = $"Loaded {Devices.Count} Sky Q boxes";
+        Status = $"Loaded {Devices.Count} boxes";
     }
 
     private async Task SaveAsync()
@@ -316,7 +333,7 @@
 
         if (string.IsNullOrWhiteSpace(Editor.SkyQHost))
         {
-            Status = "Sky Q box is required";
+            Status = "A Sky Q or Sky Stream box is required";
             return;
         }
 
@@ -337,7 +354,8 @@
             Editor.SkyQHost,
             Editor.SkyQHostName,
             Editor.SkyQModel,
-            DateTimeOffset.UtcNow));
+            DateTimeOffset.UtcNow,
+            Editor.RemoteKind));
 
         LoadPresets();
         EditPreset(saved);
@@ -369,7 +387,8 @@
             WatchdogStallSeconds = preset.WatchdogStallSeconds ?? GetDefaultWatchdogStallSeconds(preset.SourceType),
             SkyQHost = preset.SkyQHost,
             SkyQHostName = preset.SkyQHostName,
-            SkyQModel = preset.SkyQModel
+            SkyQModel = preset.SkyQModel,
+            RemoteKind = SkyRemoteKinds.Normalize(preset.RemoteKind)
         };
         Status = $"Editing {preset.Name}";
     }
@@ -393,8 +412,9 @@
 
     private Task OnDeviceChanged(ChangeEventArgs args)
     {
-        var host = args.Value?.ToString() ?? string.Empty;
-        var device = Devices.FirstOrDefault(item => item.Host == host);
+        var value = args.Value?.ToString() ?? string.Empty;
+        var device = Devices.FirstOrDefault(item => item.Value == value);
+        Editor.RemoteKind = device?.Kind ?? SkyRemoteKinds.SkyQ;
         Editor.SkyQHost = device?.Host ?? string.Empty;
         Editor.SkyQHostName = device?.HostName ?? string.Empty;
         Editor.SkyQModel = device?.Model ?? string.Empty;
@@ -491,5 +511,23 @@
         public string SkyQHost { get; set; } = string.Empty;
         public string SkyQHostName { get; set; } = string.Empty;
         public string SkyQModel { get; set; } = string.Empty;
+        public string RemoteKind { get; set; } = SkyRemoteKinds.SkyQ;
+    }
+
+    private static string BoxCaption(DirectSkyQPreset preset) =>
+        BoxCaption(preset.RemoteKind, preset.SkyQHostName, preset.SkyQHost, preset.SkyQModel);
+
+    private static string BoxCaption(string kind, string hostName, string host, string model)
+    {
+        var prefix = SkyRemoteKinds.Normalize(kind) == SkyRemoteKinds.SkyStream ? "Sky Stream" : "Sky Q";
+        var name = string.IsNullOrWhiteSpace(hostName) ? (string.IsNullOrWhiteSpace(model) ? host : model) : hostName;
+        return string.Equals(name, host, StringComparison.OrdinalIgnoreCase)
+            ? $"{prefix} · {host}"
+            : $"{prefix} · {name} ({host})";
+    }
+
+    private sealed record BoxChoice(string Kind, string Host, string Label, string HostName, string Model)
+    {
+        public string Value => $"{Kind}|{Host}";
     }
 }

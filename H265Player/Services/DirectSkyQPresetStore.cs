@@ -129,7 +129,8 @@ public sealed class DirectSkyQPresetStore
                 : Math.Max(watchdogStallSeconds.Value, watchdogCheckIntervalSeconds.Value + 1),
             SkyQHost = preset.SkyQHost.Trim(),
             SkyQHostName = preset.SkyQHostName.Trim(),
-            SkyQModel = preset.SkyQModel.Trim()
+            SkyQModel = preset.SkyQModel.Trim(),
+            RemoteKind = SkyRemoteKinds.Normalize(preset.RemoteKind)
         };
     }
 

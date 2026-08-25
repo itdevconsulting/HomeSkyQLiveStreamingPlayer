@@ -13,7 +13,7 @@ This project is designed for self-hosted home setups where a Sky Q box is connec
 - 🎥 Managed FFmpeg ingest/transcode for awkward HTTP or RTSP sources
 - 🧩 Compatibility with H.264 and H.265/HEVC encoder outputs
 - ⚡ Low-latency playback paths depending on encoder and browser support
-- 🎛️ Built-in Sky Q discovery and remote control
+- 🎛️ Built-in Sky Q and Sky Stream discovery and remote control
 - 🔒 Authenticator-based external access with trusted local setup
 - 🐧 Self-hosted deployment with Linux install scripts for updates and re-runs
 - 🪟 Windows PowerShell installer with Windows Service deployment
@@ -109,7 +109,9 @@ Full Docker and Home Assistant notes are in [DOCKER.md](DOCKER.md).
 ## 📦 What It Does
 
 - discovers Sky Q boxes on the local private network
+- discovers Sky Stream boxes via mDNS (`_rdk-rics._tcp`) and TCP port 8091
 - sends Sky Q remote-control commands over the LAN control socket
+- sends Sky Stream remote-control commands over the Sky Remote mTLS WebSocket protocol
 - plays browser-friendly direct streams such as MPEG-TS or HLS
 - supports FFmpeg-managed ingest/transcode for awkward HTTP or RTSP sources
 - stores presets that bind a stream source to a specific Sky Q box
@@ -145,7 +147,7 @@ The Windows installer:
 - publishes the app in `Release`
 - recreates and restarts the `SkyStreamingService` Windows service
 - deploys the published app to `C:\ProgramData\SkyQStreamingService\app`
-- preserves `local-settings.json`, `auth-settings.json`, `transcoder-settings.json`, `direct-skyq-presets.json`, `skyq-cache.json`, and `runtime\` on re-runs
+- preserves `local-settings.json`, `auth-settings.json`, `transcoder-settings.json`, `direct-skyq-presets.json`, `skyq-cache.json`, `sky-stream-cache.json`, and `runtime\` on re-runs
 - registers a SYSTEM scheduled task so the app can pull a newer GitHub commit
 
 Uninstall guidance:

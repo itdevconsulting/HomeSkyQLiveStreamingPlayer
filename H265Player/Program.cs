@@ -130,8 +130,10 @@ builder.Services.AddSingleton<FfmpegTranscoderManager>();
 builder.Services.AddSingleton<ServiceRestartCoordinator>();
 builder.Services.AddSingleton<AppUpdateService>();
 builder.Services.AddSingleton<SkyQService>();
+builder.Services.AddSingleton<SkyStreamService>();
 builder.Services.AddSingleton<DirectSkyQPresetStore>();
 builder.Services.AddHostedService<SkyQRefreshService>();
+builder.Services.AddHostedService<SkyStreamRefreshService>();
 builder.Services.AddHostedService<AppUpdateBackgroundService>();
 
 var app = builder.Build();
@@ -223,6 +225,8 @@ app.MapPost("/api/transcoder/stop", (FfmpegTranscoderManager manager) =>
 });
 app.MapGet("/api/skyq/scan", ScanSkyQAsync);
 app.MapPost("/api/skyq/command", SendSkyQCommandAsync);
+app.MapGet("/api/skystream/scan", ScanSkyStreamAsync);
+app.MapPost("/api/skystream/command", SendSkyStreamCommandAsync);
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
@@ -575,6 +579,33 @@ static async Task<IResult> SendSkyQCommandAsync(
     if (string.IsNullOrWhiteSpace(request.Command))
     {
         return Results.Ok(new SkyQCommandResult(false, request.Host ?? string.Empty, string.Empty, "Sky Q command is required.", []));
+    }
+
+    var result = await service.SendCommandAsync(request.Host.Trim(), request.Command.Trim(), cancellationToken);
+    return Results.Ok(result);
+}
+
+static async Task<IResult> ScanSkyStreamAsync(SkyStreamService service, bool force = false, CancellationToken cancellationToken = default)
+{
+    var result = force
+        ? await service.ForceRefreshAsync(cancellationToken)
+        : await service.GetScanAsync(false, cancellationToken);
+    return Results.Ok(result);
+}
+
+static async Task<IResult> SendSkyStreamCommandAsync(
+    SkyQCommandRequest request,
+    SkyStreamService service,
+    CancellationToken cancellationToken)
+{
+    if (string.IsNullOrWhiteSpace(request.Host))
+    {
+        return Results.Ok(new SkyQCommandResult(false, string.Empty, request.Command ?? string.Empty, "Sky Stream host is required.", []));
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Command))
+    {
+        return Results.Ok(new SkyQCommandResult(false, request.Host ?? string.Empty, string.Empty, "Sky Stream command is required.", []));
     }
 
     var result = await service.SendCommandAsync(request.Host.Trim(), request.Command.Trim(), cancellationToken);

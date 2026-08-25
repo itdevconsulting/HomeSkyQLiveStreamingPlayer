@@ -296,6 +296,7 @@ backup_existing_state() {
         "transcoder-settings.json"
         "direct-skyq-presets.json"
         "skyq-cache.json"
+        "sky-stream-cache.json"
         "runtime"
     )
 

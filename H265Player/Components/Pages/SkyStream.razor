@@ -1,0 +1,269 @@
+@page "/skystream"
+@inject NavigationManager NavigationManager
+@inject SkyStreamService SkyStreamService
+
+<PageTitle>Sky Stream</PageTitle>
+
+<section class="panel">
+    <div class="panel-head">
+        <div class="panel-copy">
+            <p class="eyebrow">Sky Stream</p>
+            <h1>Sky Stream Remote</h1>
+            <p class="lede">This page finds Sky Stream boxes on the local network using mDNS and port 8091, then sends keys over the official Sky Remote LAN protocol (mTLS WebSocket).</p>
+        </div>
+        <PageInfo Title="Sky Stream Remote" Summary="Use this page to discover Sky Stream boxes on the local private network and send LAN remote-control commands." Items="HelpItems" />
+    </div>
+
+    <div class="toolbar">
+        <button type="button" @onclick="() => ScanAsync(true)">Scan Private Network</button>
+    </div>
+
+    <div class="status-grid">
+        <div>
+            <span class="label">App Base URL</span>
+            <code>@NavigationManager.BaseUri</code>
+        </div>
+        <div>
+            <span class="label">Networks</span>
+            <code>@(ScanResult is null ? "Not scanned" : string.Join(", ", ScanResult.Networks))</code>
+        </div>
+        <div>
+            <span class="label">Devices Found</span>
+            <code>@(ScanResult?.Devices.Count ?? 0)</code>
+        </div>
+        <div>
+            <span class="label">Last Scan</span>
+            <code>@(ScanResult?.LastScanAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "Not scanned")</code>
+        </div>
+        <div>
+            <span class="label">Selected Host</span>
+            <code>@(SelectedDevice is null ? "None" : FormatDevice(SelectedDevice))</code>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-copy">
+        <p class="eyebrow">Discovered Boxes</p>
+    </div>
+
+    @if (ScanResult?.SkippedNetworks is { Count: > 0 })
+    {
+        <pre class="log">@string.Join(Environment.NewLine, ScanResult.SkippedNetworks)</pre>
+    }
+
+    <div class="home-grid">
+        @if (ScanResult?.Devices is { Count: > 0 })
+        {
+            @foreach (var device in ScanResult.Devices)
+            {
+                <button type="button" class="home-card skyq-device-button" @onclick="() => SelectDevice(device)">
+                    <strong>@(string.IsNullOrWhiteSpace(device.DisplayName) ? "Sky Stream" : device.DisplayName)</strong>
+                    <span>@device.Host</span>
+                    <span>Port @device.Port</span>
+                    <span>@(string.IsNullOrWhiteSpace(device.MacAddress) ? "No WoL MAC" : device.MacAddress)</span>
+                </button>
+            }
+        }
+        else
+        {
+            <div class="home-card">
+                <strong>No Sky Stream boxes yet</strong>
+                <span>Run the scan to look for `_rdk-rics._tcp` and TCP port 8091 on connected private subnets.</span>
+            </div>
+        }
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-copy">
+        <p class="eyebrow">Remote</p>
+        <h2>@(SelectedDevice is null ? "No device selected" : string.IsNullOrWhiteSpace(SelectedDevice.DisplayName) ? "Sky Stream" : SelectedDevice.DisplayName)</h2>
+        <p class="lede">Choose a discovered box above, then send keys. The first command pairs and binds the session.</p>
+    </div>
+
+    <div class="status-grid">
+        <div>
+            <span class="label">Selected Box</span>
+            <code>@(SelectedDevice is null ? "None" : FormatDevice(SelectedDevice))</code>
+        </div>
+        <div>
+            <span class="label">Last Command</span>
+            <code>@LastCommand</code>
+        </div>
+        <div>
+            <span class="label">Result</span>
+            <code>@CommandStatus</code>
+        </div>
+    </div>
+
+    <div class="control-grid skyq-remote-grid">
+        @foreach (var command in PrimaryCommands)
+        {
+            <button type="button" @onclick="() => SendCommandAsync(command.Value)" disabled="@IsBusy">@command.Label</button>
+        }
+    </div>
+
+    <div class="control-grid skyq-remote-grid">
+        @foreach (var command in NavigationCommands)
+        {
+            <button type="button" @onclick="() => SendCommandAsync(command.Value)" disabled="@IsBusy">@command.Label</button>
+        }
+    </div>
+
+    <div class="control-grid skyq-remote-grid">
+        @foreach (var command in PlaybackCommands)
+        {
+            <button type="button" @onclick="() => SendCommandAsync(command.Value)" disabled="@IsBusy">@command.Label</button>
+        }
+    </div>
+
+    <div class="control-grid skyq-remote-grid">
+        @foreach (var command in DigitCommands)
+        {
+            <button type="button" @onclick="() => SendCommandAsync(command.Value)" disabled="@IsBusy">@command.Label</button>
+        }
+    </div>
+
+    <pre class="log">@LogText</pre>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<string> HelpItems =
+    [
+        "The page loads the cached Sky Stream box list on startup. It does not need to scan every time.",
+        "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private subnets.",
+        "Select a discovered box before sending any remote command.",
+        "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
+        "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts."
+    ];
+
+    private SkyStreamScanResponse? ScanResult { get; set; }
+    private SkyStreamDevice? SelectedDevice { get; set; }
+    private string LastCommand { get; set; } = "None";
+    private string CommandStatus { get; set; } = "Idle";
+    private string LogText { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+
+    private static readonly IReadOnlyList<RemoteCommand> PrimaryCommands =
+    [
+        new("Power", "power"),
+        new("Home", "home"),
+        new("Menu", "tvguide"),
+        new("Search", "search"),
+        new("Dismiss", "dismiss"),
+        new("Back", "backup")
+    ];
+
+    private static readonly IReadOnlyList<RemoteCommand> NavigationCommands =
+    [
+        new("Up", "up"),
+        new("Left", "left"),
+        new("Select", "select"),
+        new("Right", "right"),
+        new("Down", "down"),
+        new("Info", "i"),
+        new("Chan +", "channelup"),
+        new("Chan -", "channeldown")
+    ];
+
+    private static readonly IReadOnlyList<RemoteCommand> PlaybackCommands =
+    [
+        new("Play/Pause", "play"),
+        new("Rewind", "rewind"),
+        new("Fast Fwd", "fastforward"),
+        new("Record", "record"),
+        new("Red", "red"),
+        new("Green", "green"),
+        new("Yellow", "yellow"),
+        new("Blue", "blue")
+    ];
+
+    private static readonly IReadOnlyList<RemoteCommand> DigitCommands =
+    [
+        new("1", "1"),
+        new("2", "2"),
+        new("3", "3"),
+        new("4", "4"),
+        new("5", "5"),
+        new("6", "6"),
+        new("7", "7"),
+        new("8", "8"),
+        new("9", "9"),
+        new("0", "0")
+    ];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await ScanAsync(false);
+        StateHasChanged();
+    }
+
+    private async Task ScanAsync(bool forceRefresh)
+    {
+        IsBusy = true;
+        try
+        {
+            ScanResult = forceRefresh
+                ? await SkyStreamService.ForceRefreshAsync(CancellationToken.None)
+                : await SkyStreamService.GetScanAsync(false, CancellationToken.None);
+            SelectedDevice = ScanResult.Devices.FirstOrDefault();
+            CommandStatus = forceRefresh ? "Scan complete" : "Loaded cached scan";
+            LogText = $"Scanned: {string.Join(", ", ScanResult.Networks)}{Environment.NewLine}Found: {ScanResult.Devices.Count}{Environment.NewLine}Last scan: {ScanResult.LastScanAt?.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
+        }
+        catch (Exception ex)
+        {
+            CommandStatus = "Scan failed";
+            LogText = $"Sky Stream scan failed.{Environment.NewLine}{ex.GetType().Name}: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void SelectDevice(SkyStreamDevice device)
+    {
+        SelectedDevice = device;
+        CommandStatus = "Device selected";
+        LogText = $"Selected {FormatDevice(device)}";
+    }
+
+    private async Task SendCommandAsync(string command)
+    {
+        if (SelectedDevice is null)
+        {
+            CommandStatus = "No device selected";
+            LogText = "Select a discovered Sky Stream box first.";
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var result = await SkyStreamService.SendCommandAsync(SelectedDevice.Host, command, CancellationToken.None);
+            LastCommand = command;
+            CommandStatus = result.Success ? "Sent" : "Failed";
+            LogText = string.Join(Environment.NewLine, new[] { result.Message }.Concat(result.Logs));
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string FormatDevice(SkyStreamDevice device)
+    {
+        var name = string.IsNullOrWhiteSpace(device.DisplayName) ? device.Host : device.DisplayName;
+        return string.Equals(name, device.Host, StringComparison.OrdinalIgnoreCase)
+            ? device.Host
+            : $"{name} ({device.Host})";
+    }
+
+    private sealed record RemoteCommand(string Label, string Value);
+}

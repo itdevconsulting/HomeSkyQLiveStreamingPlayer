@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <Content Include="..\VERSION" Link="VERSION" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Certs\sky-stream-client.pem" />
+    <EmbeddedResource Include="Certs\sky-stream-client.key" />
   </ItemGroup>
 
   <ItemGroup>

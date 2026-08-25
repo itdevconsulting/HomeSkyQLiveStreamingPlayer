@@ -17,4 +17,5 @@ public sealed record DirectSkyQPreset(
     string SkyQHost,
     string SkyQHostName,
     string SkyQModel,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string RemoteKind = SkyRemoteKinds.SkyQ);

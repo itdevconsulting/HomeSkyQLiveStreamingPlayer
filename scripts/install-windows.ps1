@@ -179,6 +179,7 @@ function Backup-ExistingState {
         "transcoder-settings.json",
         "direct-skyq-presets.json",
         "skyq-cache.json",
+        "sky-stream-cache.json",
         "runtime"
     )) {
         $source = Join-Path $script:AppDir $entry

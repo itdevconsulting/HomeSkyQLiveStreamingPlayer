@@ -124,9 +124,13 @@
             <strong>Sky Q</strong>
             <span>Scan connected private subnets for Sky Q boxes and control them from a browser-based remote.</span>
         </a>
+        <a class="home-card" href="/skystream">
+            <strong>Sky Stream</strong>
+            <span>Discover Sky Stream boxes and control them with the Sky Remote LAN protocol (mTLS WebSocket on port 8091).</span>
+        </a>
         <a class="home-card" href="/presets">
             <strong>Presets</strong>
-            <span>Save named Direct + Sky Q combinations and launch them from the left navigation.</span>
+            <span>Save named stream + Sky Q or Sky Stream combinations and launch them from the left navigation.</span>
         </a>
     </div>
 </section>
@@ -142,7 +146,8 @@
         "FFmpeg and RTSP are the managed server-side paths. They use the saved FFmpeg settings and generate browser-friendly HLS output.",
         "HLS is the straightforward browser page for .m3u8 playback with optional proxy rewriting.",
         "Engines is the comparison page for trying different browser player libraries against the same stream.",
-        "Sky Q is separate from video playback. It scans the local private network for Sky Q boxes and exposes remote control buttons."
+        "Sky Q is separate from video playback. It scans the local private network for Sky Q boxes and exposes remote control buttons.",
+        "Sky Stream is the same idea for Stream boxes: mDNS plus the Sky Remote LAN protocol on port 8091."
     ];
 
     private string AccessStatus { get; set; } = "Loading";

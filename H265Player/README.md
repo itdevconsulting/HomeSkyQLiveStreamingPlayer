@@ -131,6 +131,7 @@ Machine-local configuration and runtime state are intentionally kept out of sour
 - `transcoder-settings.json`
 - `direct-skyq-presets.json`
 - `skyq-cache.json`
+- `sky-stream-cache.json`
 - `runtime/`
 
 ## Project References
@@ -164,6 +165,12 @@ This project builds on, or was directly informed by, the following upstream proj
 - `skyq_remote`
   - Source repository for the Sky Q protocol implementation referenced while porting the discovery and remote-control behavior to C#.
   - Upstream: https://github.com/RogerSelwyn/skyq_remote
+
+### Sky Stream Control
+
+- `sky_stream_remote`
+  - The Sky Stream remote uses the reverse-engineered Sky Remote LAN protocol documented here (mDNS `_rdk-rics._tcp`, mTLS WebSocket on port 8091).
+  - Upstream: https://github.com/jatatech/sky_stream_remote
 
 ## Notes
 
