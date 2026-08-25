@@ -131,7 +131,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         }
 
         Log("TCP connected. Starting mTLS (SNI sky.xcal.tv, ALPN http/1.1).");
-        _ssl = new SslStream(_tcp.GetStream(), leaveInnerStreamOpen: true, static (_, _, _, _) => true);
+        _ssl = new SslStream(_tcp.GetStream(), leaveInnerStreamOpen: true);
         var sslOptions = new SslClientAuthenticationOptions
         {
             TargetHost = SkyStreamCredentials.ServerName,
