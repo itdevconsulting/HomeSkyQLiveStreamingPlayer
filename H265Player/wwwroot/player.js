@@ -983,6 +983,61 @@ window.h265App = {
         this._watchVideo.observer = null;
     },
 
+    enablePageRemoteKeys(dotNetRef) {
+        this.disablePageRemoteKeys();
+        this._pageRemoteKeysEnabled = true;
+        this._pageRemoteKeysRef = dotNetRef;
+        this._pageRemoteKeysHandler = (event) => {
+            if (!this._pageRemoteKeysEnabled || event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
+                return;
+            }
+
+            const target = event.target;
+            if (target instanceof Element) {
+                if (target.closest("input, textarea, select, [contenteditable='true']")) {
+                    return;
+                }
+
+                if ((event.key === "Enter" || event.key === " " || event.key === "Spacebar") &&
+                    target.closest("button, a, [role='button']")) {
+                    return;
+                }
+            }
+
+            const mapped = this._isPageRemoteKey(event.key);
+            if (!mapped) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            this._pageRemoteKeysRef?.invokeMethodAsync("HandlePageKey", event.key, !!event.shiftKey);
+        };
+        window.addEventListener("keydown", this._pageRemoteKeysHandler, true);
+    },
+
+    setPageRemoteKeysEnabled(enabled) {
+        this._pageRemoteKeysEnabled = !!enabled;
+    },
+
+    disablePageRemoteKeys() {
+        if (this._pageRemoteKeysHandler) {
+            window.removeEventListener("keydown", this._pageRemoteKeysHandler, true);
+        }
+
+        this._pageRemoteKeysHandler = null;
+        this._pageRemoteKeysRef = null;
+        this._pageRemoteKeysEnabled = false;
+    },
+
+    _isPageRemoteKey(key) {
+        return key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight" ||
+            key === "Enter" || key === "Escape" || key === "Backspace" || key === "Home" ||
+            key === " " || key === "Spacebar" || key === "+" || key === "-" || key === "=" ||
+            key === "PageUp" || key === "PageDown" ||
+            (key.length === 1 && ((key >= "0" && key <= "9") || "hHiIgGmMpP".includes(key)));
+    },
+
     enableMiniRemote(panelId, handleId, storageKey) {
         const panel = document.getElementById(panelId);
         const handle = document.getElementById(handleId);

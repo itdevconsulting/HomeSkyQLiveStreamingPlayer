@@ -1,0 +1,80 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@code {
+    private DotNetObjectReference<RemoteKeyCapture>? _dotNetRef;
+    private bool _started;
+
+    [Parameter]
+    public EventCallback<string> OnCommand { get; set; }
+
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("h265App.enablePageRemoteKeys", _dotNetRef);
+            _started = true;
+        }
+
+        if (_started)
+        {
+            await JS.InvokeVoidAsync("h265App.setPageRemoteKeysEnabled", Enabled);
+        }
+    }
+
+    [JSInvokable]
+    public Task HandlePageKey(string key, bool shift)
+    {
+        if (!Enabled)
+        {
+            return Task.CompletedTask;
+        }
+
+        var command = MapKey(key, shift);
+        return string.IsNullOrWhiteSpace(command)
+            ? Task.CompletedTask
+            : OnCommand.InvokeAsync(command);
+    }
+
+    public static string MapKey(string key, bool shift) =>
+        key switch
+        {
+            "ArrowUp" => "up",
+            "ArrowDown" => "down",
+            "ArrowLeft" => "left",
+            "ArrowRight" => "right",
+            "Enter" => "select",
+            "Escape" => "backup",
+            "Backspace" => "backup",
+            "Home" => "home",
+            " " or "Spacebar" => "pause",
+            "PageUp" => "channelup",
+            "PageDown" => "channeldown",
+            "+" => "channelup",
+            "=" when shift => "channelup",
+            "-" => "channeldown",
+            "h" or "H" => "home",
+            "i" or "I" => "i",
+            "g" or "G" or "m" or "M" => "tvguide",
+            "p" or "P" => "play",
+            "0" or "1" or "2" or "3" or "4" or "5" or "6" or "7" or "8" or "9" => key,
+            _ => string.Empty
+        };
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("h265App.disablePageRemoteKeys");
+        }
+        catch
+        {
+        }
+
+        _dotNetRef?.Dispose();
+    }
+}

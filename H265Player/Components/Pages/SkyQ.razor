@@ -20,6 +20,8 @@
 
     <ScanNetworkEditor AutoSave="true" Saved="OnScanNetworksSaved" />
 
+    <RemoteKeyCapture Enabled="SelectedDevice is not null" OnCommand="SendCommandAsync" />
+
     <div class="status-grid">
         <div>
             <span class="label">App Base URL</span>
@@ -141,6 +143,7 @@
         "Scan Private Network forces a fresh discovery run and updates the cache file used on the next app start.",
         "If the box sits on a routed subnet that is not on a local NIC, add that subnet under Additional subnets, then scan again.",
         "Select a discovered box before sending any remote command.",
+        "Keyboard arrows, numbers, Enter, Esc, Space, H, and G work on this page without clicking the on-screen remote, unless you are typing in a field.",
         "The command log shows the exact socket handshake and command result from the Sky Q control path.",
         "If a command fails with HTTP 200, read the JSON block in the log because it contains the logical success or failure from the server."
     ];

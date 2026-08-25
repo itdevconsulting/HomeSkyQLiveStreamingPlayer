@@ -12,9 +12,11 @@
     }
 </button>
 
+<RemoteKeyCapture OnCommand="OnCommand" />
+
 @if (_isOpen)
 {
-    <div id="@PanelId" class="mini-remote" tabindex="0" @onkeydown="OnKeyDownAsync" @onkeydown:preventDefault>
+    <div id="@PanelId" class="mini-remote" tabindex="0">
         <div class="mini-remote-handle">
             <div id="@HandleId" class="mini-remote-handle-drag">
                 <strong>@Title</strong>
@@ -240,30 +242,6 @@
     private Task SendRightAsync() => SendAsync("right");
 
     private Task SendSelectAsync() => SendAsync("select");
-
-    private Task OnKeyDownAsync(KeyboardEventArgs args)
-    {
-        var command = args.Key switch
-        {
-            "ArrowUp" => "up",
-            "ArrowDown" => "down",
-            "ArrowLeft" => "left",
-            "ArrowRight" => "right",
-            "Enter" => "select",
-            "Escape" => "backup",
-            " " => "pause",
-            "Spacebar" => "pause",
-            "+" => "channelup",
-            "=" when args.ShiftKey => "channelup",
-            "-" => "channeldown",
-            "0" or "1" or "2" or "3" or "4" or "5" or "6" or "7" or "8" or "9" => args.Key,
-            _ => string.Empty
-        };
-
-        return string.IsNullOrWhiteSpace(command)
-            ? Task.CompletedTask
-            : SendAsync(command);
-    }
 
     public void Dispose()
     {
