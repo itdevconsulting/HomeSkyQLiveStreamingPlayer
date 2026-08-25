@@ -133,9 +133,10 @@ Cloudflare Zero Trust / Tailscale:
 
 Sky Stream LAN:
 
-- install this service on a host that has a NIC on the Sky Stream puck’s subnet
+- keep the puck on its UK-egress gateway; do not move it onto the player’s default route
+- install this service on that gateway box (or another host that already has a NIC on the Stream LAN)
 - Tailscale is for opening the browser UI, not for Sky Remote TCP 8091
-- `nmap -Pn -sT -p 8091 <puck-ip>` from the service host must show `open`, not `filtered`
+- from the gateway box, `nmap -Pn -sT -p 8091 <puck-ip>` must show `open`, not `filtered`
 
 Source checkout used by the bootstrap installer:
 

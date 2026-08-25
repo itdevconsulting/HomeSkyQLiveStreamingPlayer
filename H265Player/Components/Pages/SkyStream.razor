@@ -9,7 +9,7 @@
         <div class="panel-copy">
             <p class="eyebrow">Sky Stream</p>
             <h1>Sky Stream Remote</h1>
-            <p class="lede">Sky Stream remote uses TCP 8091 on the puck’s LAN. Install this service on a machine that has a NIC on that subnet. You can still open the browser UI over Tailscale; the control session itself cannot cross a ping-only route.</p>
+            <p class="lede">Sky Stream remote uses TCP 8091 on the puck’s LAN. Keep the puck on its UK-egress gateway. Install this service on that gateway box (or any host that already has a NIC there). Open the browser over Tailscale; do not send 8091 across a ping-only route.</p>
         </div>
         <PageInfo Title="Sky Stream Remote" Summary="Use this page to discover Sky Stream boxes on the local private network and send LAN remote-control commands." Items="HelpItems" />
     </div>
@@ -71,7 +71,7 @@
         {
             <div class="home-card">
                 <strong>No Sky Stream boxes yet</strong>
-                <span>Run the scan from a host on the puck’s subnet. It looks for `_rdk-rics._tcp` and open TCP port 8091 on local private NICs.</span>
+                <span>Run the scan from the UK-egress gateway box (or another host on the puck’s LAN). It looks for `_rdk-rics._tcp` and open TCP port 8091 on local private NICs.</span>
             </div>
         }
     </div>
@@ -163,7 +163,7 @@
     private static readonly IReadOnlyList<string> HelpItems =
     [
         "The page loads the cached Sky Stream box list on startup. It does not need to scan every time.",
-        "This service must share a subnet with the puck (a local NIC on that LAN). Tailscale is for reaching the web UI, not for Sky Remote TCP 8091.",
+        "Keep the puck on its UK-egress gateway. Install this service on that gateway box so TCP 8091 is local. Tailscale is only for the web UI.",
         "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private NICs.",
         "Select a discovered box before sending any remote command.",
         "Wake puck is optional. If you already woke the box another way, just send keys.",

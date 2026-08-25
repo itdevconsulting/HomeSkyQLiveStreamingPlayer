@@ -112,7 +112,7 @@ Full Docker and Home Assistant notes are in [DOCKER.md](DOCKER.md).
 - discovers Sky Stream boxes via mDNS (`_rdk-rics._tcp`) and TCP port 8091 on the service host’s local private NICs
 - wakes sleeping Sky Stream pucks with a magic packet before opening the Sky Remote mTLS session
 - sends Sky Q remote-control commands over the LAN control socket
-- sends Sky Stream remote-control commands over the Sky Remote mTLS WebSocket protocol from a host on the puck’s subnet (Tailscale is for the browser UI, not for TCP 8091)
+- sends Sky Stream remote-control commands over the Sky Remote mTLS WebSocket protocol from a host on the puck’s LAN, typically the UK-egress gateway box (Tailscale is for the browser UI, not for TCP 8091)
 - plays browser-friendly direct streams such as MPEG-TS or HLS
 - supports FFmpeg-managed ingest/transcode for awkward HTTP or RTSP sources
 - stores presets that bind a stream source to a specific Sky Q box

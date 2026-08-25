@@ -522,7 +522,7 @@
             "Sky Stream Remote" =>
             [
                 "Load the cached Stream box list first, then force a scan if mDNS or port 8091 discovery needs refreshing.",
-                "Install this service on the puck’s own subnet. If 8091 stays filtered from that LAN, the puck is still asleep or firewalled — wake it with the Sky remote.",
+                "Keep the puck on its UK-egress gateway. Install this service on that gateway box so TCP 8091 is local. If 8091 is still filtered from there, wake the puck with the Sky remote.",
                 "Wake puck is optional if the box is already awake. Select it and send keys.",
                 "Select a specific discovered box before sending any command.",
                 "The first key press pairs and binds over mTLS. Later keys reuse that session.",

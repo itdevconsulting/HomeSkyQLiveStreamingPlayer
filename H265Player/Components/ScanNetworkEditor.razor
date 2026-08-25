@@ -4,7 +4,7 @@
     <div class="scan-networks-copy">
         <p class="eyebrow">Scan networks</p>
         <h2>Sky Q and Sky Stream discovery</h2>
-        <p class="lede">Connected private, VPN, and Tailscale NICs are scanned automatically. Extra CIDRs help Sky Q when TCP 9006 actually routes. Sky Stream remote needs this service on the puck’s own subnet — ping over a Tailscale subnet route is not enough.</p>
+        <p class="lede">Connected private, VPN, and Tailscale NICs are scanned automatically. Extra CIDRs help Sky Q when TCP 9006 actually routes. For Sky Stream, install this service on the UK-egress gateway box next to the puck; ping-only routes will not open TCP 8091.</p>
     </div>
 
     <div class="scan-networks-group">
