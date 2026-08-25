@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using H265Player.Models;
 
@@ -91,7 +92,8 @@ public sealed class LocalSetupStore
             UnauthenticatedPort = NormalizePort(settings.UnauthenticatedPort) ?? 5222,
             AutoUpdateEnabled = settings.AutoUpdateEnabled,
             ExtraScanNetworks = NormalizeExtraScanNetworks(settings.ExtraScanNetworks),
-            DetectedScanNetworks = []
+            DetectedScanNetworks = [],
+            SkyStreamKnownHosts = NormalizeKnownHosts(settings.SkyStreamKnownHosts)
         });
 
     private static LocalSetupSettings Empty() =>
@@ -112,6 +114,25 @@ public sealed class LocalSetupStore
     {
         PrivateIpv4.TryNormalizeScanNetworks(values, out var networks, out _);
         return networks;
+    }
+
+    private static IReadOnlyList<SkyStreamKnownHost> NormalizeKnownHosts(IEnumerable<SkyStreamKnownHost>? values)
+    {
+        var hosts = new Dictionary<string, SkyStreamKnownHost>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values ?? [])
+        {
+            if (!IPAddress.TryParse(value.Host, out var address) ||
+                address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+                !PrivateIpv4.IsPrivateLike(address) ||
+                !WakeOnLan.TryNormalizeMac(value.MacAddress, out var mac))
+            {
+                continue;
+            }
+
+            hosts[address.ToString()] = new SkyStreamKnownHost(address.ToString(), mac);
+        }
+
+        return hosts.Values.OrderBy(item => item.Host, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static int? NormalizePort(int? port) =>

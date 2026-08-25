@@ -291,6 +291,47 @@ internal static class PrivateIpv4
         return found.ToList();
     }
 
+    public static async Task<bool> WaitForOpenTcpAsync(
+        IPAddress address,
+        int port,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                break;
+            }
+
+            var attempt = remaining < TimeSpan.FromSeconds(1) ? remaining : TimeSpan.FromSeconds(1);
+            var open = await ProbeOpenTcpAsync([address], port, attempt, 1, cancellationToken);
+            if (open.Count > 0)
+            {
+                return true;
+            }
+
+            var delay = TimeSpan.FromMilliseconds(400);
+            if (DateTime.UtcNow + delay >= deadline)
+            {
+                break;
+            }
+
+            await Task.Delay(delay, cancellationToken);
+        }
+
+        return false;
+    }
+
+    public static IPAddress DirectedBroadcast(IPAddress address, int prefixLength)
+    {
+        var value = ToUInt32(address);
+        var mask = prefixLength == 0 ? 0u : uint.MaxValue << (32 - prefixLength);
+        return FromUInt32(value | ~mask);
+    }
+
     public static async Task<bool> IsReachableAsync(IPAddress address, int timeoutMilliseconds, CancellationToken cancellationToken)
     {
         try

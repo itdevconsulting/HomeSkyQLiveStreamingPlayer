@@ -61,7 +61,7 @@ public sealed class SkyStreamService : IDisposable
         _setupStore = setupStore;
         _logger = logger;
         _cachePath = AppPaths.File("sky-stream-cache.json");
-        _cachedScan = LoadCachedScan();
+        _cachedScan = MergeKnownHosts(LoadCachedScan(), _setupStore.Get().SkyStreamKnownHosts);
         _lastScanAt = _cachedScan.LastScanAt;
     }
 
@@ -167,7 +167,7 @@ public sealed class SkyStreamService : IDisposable
 
     private async Task<SkyStreamClient> OpenAsync(string host, List<string> logs, CancellationToken cancellationToken)
     {
-        TryWake(host, logs);
+        await WakeIfNeededAsync(host.Trim(), macAddress: null, waitForPort: true, logs, cancellationToken);
         logs.Add("Opening mTLS WebSocket to /iptarget.");
         var client = new SkyStreamClient(host);
         await client.ConnectAndBindAsync(cancellationToken);
@@ -177,23 +177,129 @@ public sealed class SkyStreamService : IDisposable
         return client;
     }
 
-    private void TryWake(string host, List<string> logs)
+    public async Task<SkyQCommandResult> WakeAsync(string host, string? macAddress, CancellationToken cancellationToken)
     {
-        var device = _cachedScan.Devices.FirstOrDefault(item => string.Equals(item.Host, host, StringComparison.OrdinalIgnoreCase));
-        if (device is null || string.IsNullOrWhiteSpace(device.MacAddress))
+        if (!IPAddress.TryParse(host, out var address) ||
+            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
         {
-            return;
+            return new SkyQCommandResult(false, host, "wake", "Sky Stream wake is limited to private IPv4 addresses.", []);
         }
 
-        try
+        var logs = new List<string> { $"Target={host}:{SkyStreamCredentials.Port}" };
+        if (!string.IsNullOrWhiteSpace(macAddress))
         {
-            SendWakeOnLan(device.MacAddress);
-            logs.Add($"Sent Wake-on-LAN to {device.MacAddress}.");
+            await RememberHostAsync(host, macAddress, cancellationToken);
         }
-        catch (Exception ex)
+
+        var awake = await WakeIfNeededAsync(host.Trim(), macAddress, waitForPort: true, logs, cancellationToken);
+        if (awake)
         {
-            logs.Add($"Wake-on-LAN skipped: {ex.Message}");
+            await ForceRefreshAsync(cancellationToken);
         }
+
+        return new SkyQCommandResult(
+            awake,
+            host,
+            "wake",
+            awake
+                ? "Puck is awake and TCP 8091 is open."
+                : "Sent Wake-on-LAN but TCP 8091 did not open. Confirm the MAC and that magic packets can reach the puck.",
+            logs);
+    }
+
+    private async Task<bool> WakeIfNeededAsync(
+        string host,
+        string? macAddress,
+        bool waitForPort,
+        List<string> logs,
+        CancellationToken cancellationToken)
+    {
+        if (!IPAddress.TryParse(host, out var address))
+        {
+            return false;
+        }
+
+        if (await PrivateIpv4.WaitForOpenTcpAsync(address, SkyStreamCredentials.Port, TimeSpan.FromMilliseconds(400), cancellationToken))
+        {
+            logs.Add("TCP 8091 already open.");
+            return true;
+        }
+
+        var mac = ResolveMac(host, macAddress);
+        if (string.IsNullOrWhiteSpace(mac))
+        {
+            logs.Add("No Wake-on-LAN MAC stored for this host. Enter the puck MAC, then Wake.");
+            return false;
+        }
+
+        var broadcast = DirectedBroadcastFor(address);
+        var targets = WakeOnLan.Send(mac, address, broadcast);
+        logs.Add($"Sent Wake-on-LAN to {mac} via {string.Join(", ", targets)}.");
+
+        if (!waitForPort)
+        {
+            return false;
+        }
+
+        logs.Add("Waiting for TCP 8091 after magic packet.");
+        var awake = await PrivateIpv4.WaitForOpenTcpAsync(
+            address,
+            SkyStreamCredentials.Port,
+            TimeSpan.FromSeconds(12),
+            cancellationToken);
+        logs.Add(awake ? "TCP 8091 is open." : "TCP 8091 did not open after Wake-on-LAN.");
+        return awake;
+    }
+
+    public async Task RememberHostAsync(string host, string macAddress, CancellationToken cancellationToken)
+    {
+        if (!IPAddress.TryParse(host, out var address) || !PrivateIpv4.IsPrivateLike(address))
+        {
+            throw new InvalidOperationException("Sky Stream hosts must be private IPv4 addresses.");
+        }
+
+        var mac = WakeOnLan.NormalizeMac(macAddress);
+        var current = _setupStore.Get();
+        var hosts = current.SkyStreamKnownHosts
+            .Where(item => !string.Equals(item.Host, address.ToString(), StringComparison.OrdinalIgnoreCase))
+            .Append(new SkyStreamKnownHost(address.ToString(), mac))
+            .ToList();
+        await _setupStore.SaveAsync(current with { SkyStreamKnownHosts = hosts }, cancellationToken);
+
+        _cachedScan = MergeKnownHosts(_cachedScan, hosts);
+    }
+
+    private string ResolveMac(string host, string? macAddress)
+    {
+        if (WakeOnLan.TryNormalizeMac(macAddress, out var provided))
+        {
+            return provided;
+        }
+
+        var known = _setupStore.Get().SkyStreamKnownHosts
+            .FirstOrDefault(item => string.Equals(item.Host, host, StringComparison.OrdinalIgnoreCase));
+        if (known is not null)
+        {
+            return known.MacAddress;
+        }
+
+        var cached = _cachedScan.Devices.FirstOrDefault(item =>
+            string.Equals(item.Host, host, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(item.MacAddress));
+        return cached?.MacAddress ?? string.Empty;
+    }
+
+    private IPAddress? DirectedBroadcastFor(IPAddress host)
+    {
+        foreach (var extra in PrivateIpv4.ExtraScanTargets(_setupStore.Get().ExtraScanNetworks))
+        {
+            if (PrivateIpv4.Contains(extra, host))
+            {
+                return PrivateIpv4.DirectedBroadcast(extra.Network, extra.PrefixLength);
+            }
+        }
+
+        return PrivateIpv4.DirectedBroadcast(host, 24);
     }
 
     private async Task DropSessionAsync(string host)
@@ -260,6 +366,8 @@ public sealed class SkyStreamService : IDisposable
 
         if (extraOnly.Count > 0)
         {
+            skipped.AddRange(await WakeKnownExtraHostsAsync(extraOnly, cancellationToken));
+
             foreach (var found in await SkyStreamMdns.QueryHostsAsync(
                          extraOnly.Where(item => item.PrefixLength == 32).SelectMany(PrivateIpv4.EnumerateHosts),
                          cancellationToken))
@@ -277,6 +385,47 @@ public sealed class SkyStreamService : IDisposable
                 candidates.Keys,
                 cancellationToken));
         }
+
+        var knownHosts = _setupStore.Get().SkyStreamKnownHosts;
+        foreach (var known in knownHosts)
+        {
+            if (candidates.TryGetValue(known.Host, out var existing))
+            {
+                if (string.IsNullOrWhiteSpace(existing.MacAddress))
+                {
+                    candidates[known.Host] = existing with { MacAddress = known.MacAddress };
+                }
+
+                continue;
+            }
+
+            candidates[known.Host] = new SkyStreamDevice(
+                known.Host,
+                string.Empty,
+                "Sky Stream",
+                known.MacAddress,
+                SkyStreamCredentials.Port,
+                Asleep: true);
+        }
+
+        foreach (var extraHost in extraOnly.Where(item => item.PrefixLength == 32).SelectMany(PrivateIpv4.EnumerateHosts))
+        {
+            var host = extraHost.ToString();
+            if (candidates.ContainsKey(host))
+            {
+                continue;
+            }
+
+            candidates[host] = new SkyStreamDevice(
+                host,
+                string.Empty,
+                "Sky Stream",
+                ResolveMac(host, null),
+                SkyStreamCredentials.Port,
+                Asleep: true);
+        }
+
+        await PersistDiscoveredMacsAsync(candidates.Values, cancellationToken);
 
         var devices = candidates.Values
             .OrderBy(device => device.Host)
@@ -312,7 +461,106 @@ public sealed class SkyStreamService : IDisposable
         return found;
     }
 
-    private static async Task<List<string>> DescribeUnreachableExtraHostsAsync(
+    private async Task<List<string>> WakeKnownExtraHostsAsync(
+        IReadOnlyList<PrivateIpv4.PrivateInterface> extras,
+        CancellationToken cancellationToken)
+    {
+        var messages = new List<string>();
+        var sleepy = extras
+            .Where(item => item.PrefixLength == 32)
+            .SelectMany(PrivateIpv4.EnumerateHosts)
+            .Select(host => (Address: host, Mac: ResolveMac(host.ToString(), null)))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Mac))
+            .ToList();
+
+        foreach (var item in sleepy)
+        {
+            var open = await PrivateIpv4.WaitForOpenTcpAsync(
+                item.Address,
+                SkyStreamCredentials.Port,
+                TimeSpan.FromMilliseconds(350),
+                cancellationToken);
+            if (open)
+            {
+                continue;
+            }
+
+            var broadcast = DirectedBroadcastFor(item.Address);
+            var targets = WakeOnLan.Send(item.Mac, item.Address, broadcast);
+            messages.Add($"Waking {item.Address} ({item.Mac}) via {string.Join(", ", targets)}.");
+        }
+
+        if (messages.Count > 0)
+        {
+            messages.Add("Waiting a few seconds for TCP 8091 after Wake-on-LAN.");
+            await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
+        }
+
+        return messages;
+    }
+
+    private async Task PersistDiscoveredMacsAsync(IEnumerable<SkyStreamDevice> devices, CancellationToken cancellationToken)
+    {
+        var discovered = devices
+            .Where(device => WakeOnLan.TryNormalizeMac(device.MacAddress, out _) && IPAddress.TryParse(device.Host, out _))
+            .ToList();
+        if (discovered.Count == 0)
+        {
+            return;
+        }
+
+        var current = _setupStore.Get();
+        var hosts = current.SkyStreamKnownHosts.ToDictionary(item => item.Host, StringComparer.OrdinalIgnoreCase);
+        var changed = false;
+        foreach (var device in discovered)
+        {
+            var mac = WakeOnLan.NormalizeMac(device.MacAddress);
+            if (hosts.TryGetValue(device.Host, out var existing) &&
+                string.Equals(existing.MacAddress, mac, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            hosts[device.Host] = new SkyStreamKnownHost(device.Host, mac);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await _setupStore.SaveAsync(current with { SkyStreamKnownHosts = hosts.Values.ToList() }, cancellationToken);
+        }
+    }
+
+    private static SkyStreamScanResponse MergeKnownHosts(
+        SkyStreamScanResponse scan,
+        IReadOnlyList<SkyStreamKnownHost> knownHosts)
+    {
+        var devices = scan.Devices.ToDictionary(item => item.Host, StringComparer.OrdinalIgnoreCase);
+        foreach (var known in knownHosts)
+        {
+            if (devices.TryGetValue(known.Host, out var existing))
+            {
+                if (string.IsNullOrWhiteSpace(existing.MacAddress))
+                {
+                    devices[known.Host] = existing with { MacAddress = known.MacAddress };
+                }
+            }
+            else
+            {
+                devices[known.Host] = new SkyStreamDevice(
+                    known.Host,
+                    string.Empty,
+                    "Sky Stream",
+                    known.MacAddress,
+                    SkyStreamCredentials.Port,
+                    Asleep: true);
+            }
+        }
+
+        return scan with { Devices = devices.Values.OrderBy(item => item.Host).ToList() };
+    }
+
+    private async Task<List<string>> DescribeUnreachableExtraHostsAsync(
         IReadOnlyList<PrivateIpv4.PrivateInterface> extras,
         IReadOnlyCollection<string> foundHosts,
         CancellationToken cancellationToken)
@@ -327,32 +575,22 @@ public sealed class SkyStreamService : IDisposable
             }
 
             var pingable = await PrivateIpv4.IsReachableAsync(host, 1000, cancellationToken);
-            messages.Add(pingable
-                ? $"{text} answers ping but TCP {SkyStreamCredentials.Port} timed out. Tailscale subnet routes often allow ICMP while dropping or black-holing Sky Remote TCP; enable SNAT on the subnet router and allow port {SkyStreamCredentials.Port}."
-                : $"{text} did not answer mDNS or TCP {SkyStreamCredentials.Port}.");
+            var mac = ResolveMac(text, null);
+            if (pingable && string.IsNullOrWhiteSpace(mac))
+            {
+                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} is closed. Sleeping Stream pucks need a Wake-on-LAN MAC, then a magic packet before 8091 opens.");
+            }
+            else if (pingable)
+            {
+                messages.Add($"{text} answers ping but TCP {SkyStreamCredentials.Port} stayed closed after Wake-on-LAN.");
+            }
+            else
+            {
+                messages.Add($"{text} did not answer mDNS or TCP {SkyStreamCredentials.Port}.");
+            }
         }
 
         return messages;
-    }
-
-    private static void SendWakeOnLan(string macAddress)
-    {
-        var hex = new string(macAddress.Where(Uri.IsHexDigit).ToArray());
-        if (hex.Length != 12)
-        {
-            throw new ArgumentException("MAC address must contain 12 hex digits.", nameof(macAddress));
-        }
-
-        var mac = Convert.FromHexString(hex);
-        var packet = new byte[102];
-        Array.Fill(packet, (byte)0xFF, 0, 6);
-        for (var i = 0; i < 16; i++)
-        {
-            Buffer.BlockCopy(mac, 0, packet, 6 + (i * 6), 6);
-        }
-
-        using var udp = new UdpClient { EnableBroadcast = true };
-        udp.Send(packet, packet.Length, new IPEndPoint(IPAddress.Broadcast, 9));
     }
 
     private SkyStreamScanResponse LoadCachedScan()

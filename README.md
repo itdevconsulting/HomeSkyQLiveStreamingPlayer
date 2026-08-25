@@ -110,6 +110,7 @@ Full Docker and Home Assistant notes are in [DOCKER.md](DOCKER.md).
 
 - discovers Sky Q boxes on connected private networks and any extra scan subnets you add
 - discovers Sky Stream boxes via mDNS (`_rdk-rics._tcp`) and TCP port 8091, including extra routed subnets
+- wakes sleeping Sky Stream pucks with a magic packet before opening the Sky Remote mTLS session
 - sends Sky Q remote-control commands over the LAN control socket
 - sends Sky Stream remote-control commands over the Sky Remote mTLS WebSocket protocol
 - plays browser-friendly direct streams such as MPEG-TS or HLS

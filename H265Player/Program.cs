@@ -228,6 +228,7 @@ app.MapGet("/api/skyq/scan", ScanSkyQAsync);
 app.MapPost("/api/skyq/command", SendSkyQCommandAsync);
 app.MapGet("/api/skystream/scan", ScanSkyStreamAsync);
 app.MapPost("/api/skystream/command", SendSkyStreamCommandAsync);
+app.MapPost("/api/skystream/wake", WakeSkyStreamAsync);
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
@@ -315,12 +316,16 @@ static async Task<IResult> SaveLocalSetupAsync(
     try
     {
         var resolved = FfmpegPathResolver.ResolveOrThrow(settings.FfmpegPath.Trim());
+        var current = store.Get();
         var normalized = settings with
         {
             FfmpegPath = resolved,
             UnauthenticatedPort = NormalizeOptionalPort(settings.UnauthenticatedPort),
             ExtraScanNetworks = extraScanNetworks,
-            DetectedScanNetworks = []
+            DetectedScanNetworks = [],
+            SkyStreamKnownHosts = settings.SkyStreamKnownHosts.Count > 0
+                ? settings.SkyStreamKnownHosts
+                : current.SkyStreamKnownHosts
         };
         var portValidationError = ValidateUnauthenticatedPort(normalized, httpContext, accessOptions);
         if (portValidationError is not null)
@@ -647,6 +652,26 @@ static async Task<IResult> SendSkyStreamCommandAsync(
 
     var result = await service.SendCommandAsync(request.Host.Trim(), request.Command.Trim(), cancellationToken);
     return Results.Ok(result);
+}
+
+static async Task<IResult> WakeSkyStreamAsync(
+    SkyStreamWakeRequest request,
+    SkyStreamService service,
+    CancellationToken cancellationToken)
+{
+    if (string.IsNullOrWhiteSpace(request.Host))
+    {
+        return Results.BadRequest("Sky Stream host is required.");
+    }
+
+    try
+    {
+        return Results.Ok(await service.WakeAsync(request.Host.Trim(), request.MacAddress, cancellationToken));
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+    {
+        return Results.BadRequest(ex.Message);
+    }
 }
 
 static async Task<IResult?> ValidateSettingsAsync(TranscoderSettings settings, CancellationToken cancellationToken)

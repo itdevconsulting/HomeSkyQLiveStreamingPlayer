@@ -12,6 +12,7 @@ public sealed record LocalSetupSettings
     public bool AutoUpdateEnabled { get; init; }
     public IReadOnlyList<string> ExtraScanNetworks { get; init; } = [];
     public IReadOnlyList<string> DetectedScanNetworks { get; init; } = [];
+    public IReadOnlyList<SkyStreamKnownHost> SkyStreamKnownHosts { get; init; } = [];
 
     [JsonIgnore]
     public bool IsConfigured => !string.IsNullOrWhiteSpace(FfmpegPath);
@@ -23,3 +24,7 @@ public sealed record LocalSetupSettings
 }
 
 public sealed record ScanNetworksRequest(IReadOnlyList<string>? ExtraScanNetworks);
+
+public sealed record SkyStreamKnownHost(string Host, string MacAddress);
+
+public sealed record SkyStreamWakeRequest(string? Host, string? MacAddress);

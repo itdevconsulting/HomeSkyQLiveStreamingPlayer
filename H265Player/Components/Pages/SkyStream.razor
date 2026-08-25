@@ -62,8 +62,8 @@
                 <button type="button" class="home-card skyq-device-button" @onclick="() => SelectDevice(device)">
                     <strong>@(string.IsNullOrWhiteSpace(device.DisplayName) ? "Sky Stream" : device.DisplayName)</strong>
                     <span>@device.Host</span>
-                    <span>Port @device.Port</span>
                     <span>@(string.IsNullOrWhiteSpace(device.MacAddress) ? "No WoL MAC" : device.MacAddress)</span>
+                    <span>@(device.Asleep ? "Asleep — wake first" : $"Port {device.Port}")</span>
                 </button>
             }
         }
@@ -81,13 +81,17 @@
     <div class="panel-copy">
         <p class="eyebrow">Remote</p>
         <h2>@(SelectedDevice is null ? "No device selected" : string.IsNullOrWhiteSpace(SelectedDevice.DisplayName) ? "Sky Stream" : SelectedDevice.DisplayName)</h2>
-        <p class="lede">Choose a discovered box above, then send keys. The first command pairs and binds the session.</p>
+        <p class="lede">Choose a discovered box above, then send keys. Sleeping pucks need a magic packet first: enter the MAC, press Wake puck, wait for TCP 8091, then the first key pairs and binds.</p>
     </div>
 
     <div class="status-grid">
         <div>
             <span class="label">Selected Box</span>
             <code>@(SelectedDevice is null ? "None" : FormatDevice(SelectedDevice))</code>
+        </div>
+        <div>
+            <span class="label">Wake MAC</span>
+            <code>@(string.IsNullOrWhiteSpace(MacAddress) ? "Not set" : MacAddress)</code>
         </div>
         <div>
             <span class="label">Last Command</span>
@@ -97,6 +101,18 @@
             <span class="label">Result</span>
             <code>@CommandStatus</code>
         </div>
+    </div>
+
+    <div class="scan-network-add">
+        <label class="field">
+            <span>Puck MAC for Wake-on-LAN</span>
+            <input type="text"
+                   @bind="MacAddress"
+                   spellcheck="false"
+                   placeholder="aa:bb:cc:dd:ee:ff"
+                   autocomplete="off" />
+        </label>
+        <button type="button" @onclick="WakeAsync" disabled="@IsBusy">Wake puck</button>
     </div>
 
     <div class="control-grid skyq-remote-grid">
@@ -136,12 +152,14 @@
         "The page loads the cached Sky Stream box list on startup. It does not need to scan every time.",
         "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private subnets plus any additional networks you add.",
         "Select a discovered box before sending any remote command.",
+        "Sleeping Stream pucks only answer ping. Enter the puck MAC, press Wake puck, wait a few seconds, then TCP 8091 opens for mTLS control.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts."
     ];
 
     private SkyStreamScanResponse? ScanResult { get; set; }
     private SkyStreamDevice? SelectedDevice { get; set; }
+    private string MacAddress { get; set; } = string.Empty;
     private string LastCommand { get; set; } = "None";
     private string CommandStatus { get; set; } = "Idle";
     private string LogText { get; set; } = string.Empty;
@@ -216,7 +234,14 @@
             ScanResult = forceRefresh
                 ? await SkyStreamService.ForceRefreshAsync(CancellationToken.None)
                 : await SkyStreamService.GetScanAsync(false, CancellationToken.None);
-            SelectedDevice = ScanResult.Devices.FirstOrDefault();
+            SelectedDevice = ScanResult.Devices.FirstOrDefault(device =>
+                                 SelectedDevice is not null &&
+                                 string.Equals(device.Host, SelectedDevice.Host, StringComparison.OrdinalIgnoreCase))
+                             ?? ScanResult.Devices.FirstOrDefault();
+            if (SelectedDevice is not null && string.IsNullOrWhiteSpace(MacAddress))
+            {
+                MacAddress = SelectedDevice.MacAddress;
+            }
             CommandStatus = forceRefresh ? "Scan complete" : "Loaded cached scan";
             LogText = $"Scanned: {string.Join(", ", ScanResult.Networks)}{Environment.NewLine}Found: {ScanResult.Devices.Count}{Environment.NewLine}Last scan: {ScanResult.LastScanAt?.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
         }
@@ -234,8 +259,49 @@
     private void SelectDevice(SkyStreamDevice device)
     {
         SelectedDevice = device;
-        CommandStatus = "Device selected";
+        if (!string.IsNullOrWhiteSpace(device.MacAddress))
+        {
+            MacAddress = device.MacAddress;
+        }
+
+        CommandStatus = device.Asleep ? "Asleep — wake first" : "Device selected";
         LogText = $"Selected {FormatDevice(device)}";
+    }
+
+    private async Task WakeAsync()
+    {
+        if (SelectedDevice is null && ScanResult?.Devices.Count is not > 0)
+        {
+            CommandStatus = "No device selected";
+            LogText = "Add the puck subnet or host, then select it before sending Wake-on-LAN.";
+            return;
+        }
+
+        var host = SelectedDevice?.Host ?? ScanResult!.Devices[0].Host;
+        IsBusy = true;
+        try
+        {
+            var result = await SkyStreamService.WakeAsync(host, MacAddress, CancellationToken.None);
+            LastCommand = "wake";
+            CommandStatus = result.Success ? "Awake" : "Wake failed";
+            LogText = string.Join(Environment.NewLine, new[] { result.Message }.Concat(result.Logs));
+            ScanResult = await SkyStreamService.GetScanAsync(false, CancellationToken.None);
+            SelectedDevice = ScanResult.Devices.FirstOrDefault(device =>
+                string.Equals(device.Host, host, StringComparison.OrdinalIgnoreCase));
+            if (SelectedDevice is not null && !string.IsNullOrWhiteSpace(SelectedDevice.MacAddress))
+            {
+                MacAddress = SelectedDevice.MacAddress;
+            }
+        }
+        catch (Exception ex)
+        {
+            CommandStatus = "Wake failed";
+            LogText = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task SendCommandAsync(string command)

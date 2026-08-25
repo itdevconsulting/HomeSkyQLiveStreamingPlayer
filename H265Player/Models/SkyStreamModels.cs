@@ -11,7 +11,8 @@ public sealed record SkyStreamDevice(
     string HostName,
     string DisplayName,
     string MacAddress,
-    int Port);
+    int Port,
+    bool Asleep = false);
 
 public static class SkyRemoteKinds
 {
