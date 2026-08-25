@@ -123,6 +123,14 @@ internal static class PrivateIpv4
         return result;
     }
 
+    public static IReadOnlyList<PrivateInterface> ExtraProbeTargets(
+        IReadOnlyList<PrivateInterface> local,
+        IReadOnlyList<PrivateInterface> extras) =>
+        extras
+            .Where(extra => extra.PrefixLength == 32 ||
+                            local.All(item => !string.Equals(item.Cidr, extra.Cidr, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
     public static bool Contains(PrivateInterface network, IPAddress address)
     {
         if (address.AddressFamily != AddressFamily.InterNetwork)
@@ -281,6 +289,20 @@ internal static class PrivateIpv4
 
         await Task.WhenAll(tasks);
         return found.ToList();
+    }
+
+    public static async Task<bool> IsReachableAsync(IPAddress address, int timeoutMilliseconds, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var ping = new Ping();
+            var reply = await ping.SendPingAsync(address, timeoutMilliseconds);
+            return reply.Status == IPStatus.Success;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool TryGetFromLinuxIp(out List<PrivateInterface> interfaces, out string? errorMessage)

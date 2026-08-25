@@ -141,10 +141,7 @@ public sealed class SkyQService : IDisposable
         var extraScanNetworks = _setupStore.Get().ExtraScanNetworks;
         var interfaceScan = PrivateIpv4.GetInterfaces(_logger);
         var extras = PrivateIpv4.ExtraScanTargets(extraScanNetworks);
-        var extraOnly = extras
-            .Where(extra => interfaceScan.Interfaces.All(local =>
-                !string.Equals(local.Cidr, extra.Cidr, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
+        var extraOnly = PrivateIpv4.ExtraProbeTargets(interfaceScan.Interfaces, extras);
         var skippedNetworks = interfaceScan.Messages.ToList();
         var networks = interfaceScan.Interfaces.Select(item => item.Cidr)
             .Concat(extras.Select(item => item.Cidr))
@@ -181,11 +178,24 @@ public sealed class SkyQService : IDisposable
             foreach (var address in await PrivateIpv4.ProbeOpenTcpAsync(
                          extraHosts,
                          JsonPort,
-                         TimeSpan.FromMilliseconds(250),
+                         TimeSpan.FromSeconds(2),
                          32,
                          cancellationToken))
             {
                 candidates.Add(address);
+            }
+
+            foreach (var host in extraOnly.Where(item => item.PrefixLength == 32).SelectMany(PrivateIpv4.EnumerateHosts))
+            {
+                if (candidates.Contains(host))
+                {
+                    continue;
+                }
+
+                var pingable = await PrivateIpv4.IsReachableAsync(host, 1000, cancellationToken);
+                skippedNetworks.Add(pingable
+                    ? $"{host} answers ping but TCP {JsonPort} timed out. If this is a Sky Stream box, use the Sky Stream page. If it is Sky Q, Tailscale subnet routes often allow ICMP while dropping control TCP."
+                    : $"{host} did not accept TCP {JsonPort}.");
             }
         }
 

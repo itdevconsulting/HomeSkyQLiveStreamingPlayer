@@ -27,6 +27,23 @@ internal static class SkyStreamMdns
         return found.Values;
     }
 
+    public static async Task<IReadOnlyCollection<Discovered>> QueryHostsAsync(
+        IEnumerable<IPAddress> hosts,
+        CancellationToken cancellationToken)
+    {
+        var found = new Dictionary<string, Discovered>(StringComparer.OrdinalIgnoreCase);
+        var tasks = hosts.Distinct().Select(host => QueryUnicastAsync(host, cancellationToken));
+        foreach (var device in await Task.WhenAll(tasks))
+        {
+            if (device is not null)
+            {
+                found[device.Host] = device;
+            }
+        }
+
+        return found.Values;
+    }
+
     private static async Task<List<Discovered>> QueryInterfaceAsync(IPAddress localAddress, CancellationToken cancellationToken)
     {
         var results = new List<Discovered>();
@@ -72,6 +89,23 @@ internal static class SkyStreamMdns
         }
 
         return results;
+    }
+
+    private static async Task<Discovered?> QueryUnicastAsync(IPAddress host, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+            await udp.SendAsync(QueryPacket, QueryPacket.Length, new IPEndPoint(host, MdnsPort));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            var response = await udp.ReceiveAsync(timeout.Token);
+            return Parse(response.Buffer, host);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Discovered? Parse(byte[] buffer, IPAddress source)

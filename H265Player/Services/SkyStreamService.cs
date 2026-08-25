@@ -219,10 +219,7 @@ public sealed class SkyStreamService : IDisposable
         var extraScanNetworks = _setupStore.Get().ExtraScanNetworks;
         var interfaceScan = PrivateIpv4.GetInterfaces(_logger);
         var extras = PrivateIpv4.ExtraScanTargets(extraScanNetworks);
-        var extraOnly = extras
-            .Where(extra => interfaceScan.Interfaces.All(local =>
-                !string.Equals(local.Cidr, extra.Cidr, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
+        var extraOnly = PrivateIpv4.ExtraProbeTargets(interfaceScan.Interfaces, extras);
         var skipped = interfaceScan.Messages.ToList();
         var networks = interfaceScan.Interfaces.Select(item => item.Cidr)
             .Concat(extras.Select(item => item.Cidr))
@@ -255,7 +252,7 @@ public sealed class SkyStreamService : IDisposable
 
         if (candidates.Count == 0 && interfaceScan.Interfaces.Count > 0)
         {
-            foreach (var open in await ProbePortAsync(interfaceScan.Interfaces, cancellationToken))
+            foreach (var open in await ProbePortAsync(interfaceScan.Interfaces, TimeSpan.FromMilliseconds(250), cancellationToken))
             {
                 candidates[open] = new SkyStreamDevice(open, string.Empty, "Sky Stream", string.Empty, SkyStreamCredentials.Port);
             }
@@ -263,10 +260,22 @@ public sealed class SkyStreamService : IDisposable
 
         if (extraOnly.Count > 0)
         {
-            foreach (var open in await ProbePortAsync(extraOnly, cancellationToken))
+            foreach (var found in await SkyStreamMdns.QueryHostsAsync(
+                         extraOnly.Where(item => item.PrefixLength == 32).SelectMany(PrivateIpv4.EnumerateHosts),
+                         cancellationToken))
             {
-                candidates[open] = new SkyStreamDevice(open, string.Empty, "Sky Stream", string.Empty, SkyStreamCredentials.Port);
+                candidates[found.Host] = new SkyStreamDevice(found.Host, found.Name, found.Name, found.MacAddress, found.Port);
             }
+
+            foreach (var open in await ProbePortAsync(extraOnly, TimeSpan.FromSeconds(2), cancellationToken))
+            {
+                candidates.TryAdd(open, new SkyStreamDevice(open, string.Empty, "Sky Stream", string.Empty, SkyStreamCredentials.Port));
+            }
+
+            skipped.AddRange(await DescribeUnreachableExtraHostsAsync(
+                extraOnly,
+                candidates.Keys,
+                cancellationToken));
         }
 
         var devices = candidates.Values
@@ -285,13 +294,14 @@ public sealed class SkyStreamService : IDisposable
 
     private static async Task<HashSet<string>> ProbePortAsync(
         IReadOnlyList<PrivateIpv4.PrivateInterface> interfaces,
+        TimeSpan timeout,
         CancellationToken cancellationToken)
     {
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var hosts = await PrivateIpv4.ProbeOpenTcpAsync(
             interfaces.SelectMany(PrivateIpv4.EnumerateHosts),
             SkyStreamCredentials.Port,
-            TimeSpan.FromMilliseconds(250),
+            timeout,
             32,
             cancellationToken);
         foreach (var host in hosts)
@@ -300,6 +310,29 @@ public sealed class SkyStreamService : IDisposable
         }
 
         return found;
+    }
+
+    private static async Task<List<string>> DescribeUnreachableExtraHostsAsync(
+        IReadOnlyList<PrivateIpv4.PrivateInterface> extras,
+        IReadOnlyCollection<string> foundHosts,
+        CancellationToken cancellationToken)
+    {
+        var messages = new List<string>();
+        foreach (var host in extras.Where(item => item.PrefixLength == 32).SelectMany(PrivateIpv4.EnumerateHosts))
+        {
+            var text = host.ToString();
+            if (foundHosts.Contains(text, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var pingable = await PrivateIpv4.IsReachableAsync(host, 1000, cancellationToken);
+            messages.Add(pingable
+                ? $"{text} answers ping but TCP {SkyStreamCredentials.Port} timed out. Tailscale subnet routes often allow ICMP while dropping or black-holing Sky Remote TCP; enable SNAT on the subnet router and allow port {SkyStreamCredentials.Port}."
+                : $"{text} did not answer mDNS or TCP {SkyStreamCredentials.Port}.");
+        }
+
+        return messages;
     }
 
     private static void SendWakeOnLan(string macAddress)
