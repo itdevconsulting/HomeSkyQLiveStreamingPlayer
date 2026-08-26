@@ -58,9 +58,9 @@ public sealed class SkyStreamService : IDisposable
     private readonly LocalSetupStore _setupStore;
     private SkyStreamScanResponse _cachedScan;
     private DateTimeOffset? _lastScanAt;
-    private static readonly TimeSpan DigitKeyGap = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan FirstDigitGap = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan OtherKeyGap = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan DigitKeyGap = TimeSpan.FromMilliseconds(550);
+    private static readonly TimeSpan FirstDigitGap = TimeSpan.FromMilliseconds(800);
+    private static readonly TimeSpan OtherKeyGap = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromHours(1);
 
     public SkyStreamService(IHostEnvironment environment, LocalSetupStore setupStore, ILogger<SkyStreamService> logger)
@@ -130,18 +130,8 @@ public sealed class SkyStreamService : IDisposable
         };
 
         var hostKey = host.Trim();
-        var sequence = PreemptSequence(hostKey, cancellationToken);
         var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
-        try
-        {
-            await gate.WaitAsync(sequence.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            CompleteSequence(hostKey, sequence);
-            return new SkyQCommandResult(true, host, command, "Superseded by a newer command.", logs);
-        }
-
+        await gate.WaitAsync(cancellationToken);
         try
         {
             var isDigit = command.Length == 1 && char.IsDigit(command[0]);
@@ -155,27 +145,22 @@ public sealed class SkyStreamService : IDisposable
                 if (wait > 0)
                 {
                     logs.Add($"Spacing {wait}ms before {command}.");
-                    await Task.Delay((int)Math.Min(wait, 2000), sequence.Token);
+                    await Task.Delay((int)Math.Min(wait, 2000), cancellationToken);
                 }
             }
 
             if (isDigit && !continuingDigits)
             {
                 logs.Add($"Waiting {FirstDigitGap.TotalMilliseconds:0}ms before first digit.");
-                await Task.Delay(FirstDigitGap, sequence.Token);
+                await Task.Delay(FirstDigitGap, cancellationToken);
             }
 
-            var response = await SendKeyWithRetryAsync(hostKey, key, logs, sequence.Token);
+            var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
             _nextKeyAt[hostKey] = Environment.TickCount64 + (long)gap.TotalMilliseconds;
             _lastWasDigit[hostKey] = isDigit;
             var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
             logs.Add(ok ? "Key accepted." : $"Box response: {response}");
             return new SkyQCommandResult(ok, host, command, ok ? "Command sent." : "Sky Stream rejected the key.", logs);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            logs.Add("Superseded by a newer command.");
-            return new SkyQCommandResult(true, host, command, "Superseded by a newer command.", logs);
         }
         catch (Exception ex)
         {
@@ -185,7 +170,6 @@ public sealed class SkyStreamService : IDisposable
         finally
         {
             gate.Release();
-            CompleteSequence(hostKey, sequence);
         }
     }
 
@@ -227,7 +211,7 @@ public sealed class SkyStreamService : IDisposable
         try
         {
             logs.Add("Waiting after Guide before the channel number.");
-            await Task.Delay(1500, waitCts.Token);
+            await Task.Delay(2000, waitCts.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -319,12 +303,12 @@ public sealed class SkyStreamService : IDisposable
 
     private async Task SendGuidePathAsync(string host, List<string> logs, CancellationToken cancellationToken)
     {
-        await SendKeyedAsync(host, "home", 2600, logs, cancellationToken);
-        await SendKeyedAsync(host, "down", 280, logs, cancellationToken);
-        await SendKeyedAsync(host, "down", 800, logs, cancellationToken);
+        await SendKeyedAsync(host, "home", 2800, logs, cancellationToken);
+        await SendKeyedAsync(host, "down", 700, logs, cancellationToken);
+        await SendKeyedAsync(host, "down", 1000, logs, cancellationToken);
+        await SendKeyedAsync(host, "select", 1600, logs, cancellationToken);
         await SendKeyedAsync(host, "select", 1400, logs, cancellationToken);
-        await SendKeyedAsync(host, "select", 1100, logs, cancellationToken);
-        await SendKeyedAsync(host, "select", 500, logs, cancellationToken);
+        await SendKeyedAsync(host, "select", 800, logs, cancellationToken);
     }
 
     private async Task SendKeyedAsync(

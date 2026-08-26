@@ -75,17 +75,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
             ["key"] = key
         }, cancellationToken);
         Log($"Sent key {key}.");
-
-        using var receiveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        receiveCts.CancelAfter(TimeSpan.FromSeconds(5));
-        try
-        {
-            return await ReceiveJsonAsync(receiveCts.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException($"Sky Stream did not acknowledge key {key} within 5s.");
-        }
+        return await ReceiveJsonAsync(cancellationToken);
     }
 
     public async Task SendKeyNoWaitAsync(string key, CancellationToken cancellationToken)
