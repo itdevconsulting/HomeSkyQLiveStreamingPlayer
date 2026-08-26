@@ -50,6 +50,7 @@ public sealed class SkyStreamService : IDisposable
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _commandLocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _sequenceCts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> _nextKeyAt = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, bool> _lastWasDigit = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<Task<SkyStreamClient>>> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _cachePath;
     private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
@@ -58,6 +59,7 @@ public sealed class SkyStreamService : IDisposable
     private SkyStreamScanResponse _cachedScan;
     private DateTimeOffset? _lastScanAt;
     private static readonly TimeSpan DigitKeyGap = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan FirstDigitGap = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan OtherKeyGap = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromHours(1);
 
@@ -142,19 +144,30 @@ public sealed class SkyStreamService : IDisposable
 
         try
         {
-            var gap = command.Length == 1 && char.IsDigit(command[0]) ? DigitKeyGap : OtherKeyGap;
+            var isDigit = command.Length == 1 && char.IsDigit(command[0]);
+            var continuingDigits = isDigit && _lastWasDigit.TryGetValue(hostKey, out var previousDigit) && previousDigit;
+            var gap = isDigit
+                ? (continuingDigits ? DigitKeyGap : FirstDigitGap)
+                : OtherKeyGap;
             if (_nextKeyAt.TryGetValue(hostKey, out var next))
             {
                 var wait = next - Environment.TickCount64;
                 if (wait > 0)
                 {
                     logs.Add($"Spacing {wait}ms before {command}.");
-                    await Task.Delay((int)Math.Min(wait, (long)gap.TotalMilliseconds), sequence.Token);
+                    await Task.Delay((int)Math.Min(wait, 2000), sequence.Token);
                 }
+            }
+
+            if (isDigit && !continuingDigits)
+            {
+                logs.Add($"Waiting {FirstDigitGap.TotalMilliseconds:0}ms before first digit.");
+                await Task.Delay(FirstDigitGap, sequence.Token);
             }
 
             var response = await SendKeyWithRetryAsync(hostKey, key, logs, sequence.Token);
             _nextKeyAt[hostKey] = Environment.TickCount64 + (long)gap.TotalMilliseconds;
+            _lastWasDigit[hostKey] = isDigit;
             var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
             logs.Add(ok ? "Key accepted." : $"Box response: {response}");
             return new SkyQCommandResult(ok, host, command, ok ? "Command sent." : "Sky Stream rejected the key.", logs);
@@ -204,31 +217,42 @@ public sealed class SkyStreamService : IDisposable
             return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
         }
 
+        if (!guide.Success)
+        {
+            return new SkyQCommandResult(false, host, "livetv", guide.Message, logs);
+        }
+
         var hostKey = host.Trim();
-        var sequence = PreemptSequence(hostKey, cancellationToken);
-        var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
+        var waitCts = PreemptSequence(hostKey, cancellationToken);
         try
         {
-            await gate.WaitAsync(sequence.Token);
+            logs.Add("Waiting after Guide before the channel number.");
+            await Task.Delay(1500, waitCts.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            CompleteSequence(hostKey, sequence);
+            CompleteSequence(hostKey, waitCts);
             return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
         }
 
+        CompleteSequence(hostKey, waitCts);
+
         try
         {
-            logs.Add("Guide finished. Waiting before the channel number.");
-            await Task.Delay(1500, sequence.Token);
-
             foreach (var digit in channelNumber.ToString())
             {
-                await SendKeyedAsync(hostKey, digit.ToString(), 400, logs, sequence.Token);
+                var step = await SendCommandAsync(host, digit.ToString(), cancellationToken);
+                logs.AddRange(step.Logs);
+                if (string.Equals(step.Message, "Superseded by a newer command.", StringComparison.Ordinal))
+                {
+                    return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
+                }
             }
 
-            await SendKeyedAsync(hostKey, "select", 500, logs, sequence.Token);
-            await SendKeyedAsync(hostKey, "select", 200, logs, sequence.Token);
+            var ok1 = await SendCommandAsync(host, "select", cancellationToken);
+            logs.AddRange(ok1.Logs);
+            var ok2 = await SendCommandAsync(host, "select", cancellationToken);
+            logs.AddRange(ok2.Logs);
 
             return new SkyQCommandResult(true, host, "livetv", $"Tuning live TV {channelNumber}.", logs);
         }
@@ -241,11 +265,6 @@ public sealed class SkyStreamService : IDisposable
         {
             logs.Add($"{ex.GetType().Name}: {ex.Message}");
             return new SkyQCommandResult(false, host, "livetv", ex.Message, logs);
-        }
-        finally
-        {
-            gate.Release();
-            CompleteSequence(hostKey, sequence);
         }
     }
 
@@ -326,6 +345,7 @@ public sealed class SkyStreamService : IDisposable
         await client.SendKeyNoWaitAsync(key, cancellationToken);
         logs.Add("Key sent.");
         _nextKeyAt[host] = Environment.TickCount64 + settleMs;
+        _lastWasDigit[host] = command.Length == 1 && char.IsDigit(command[0]);
         if (settleMs > 0)
         {
             await Task.Delay(settleMs, cancellationToken);
