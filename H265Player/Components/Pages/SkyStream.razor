@@ -167,7 +167,7 @@
     [
         "The page loads the cached Sky Stream box list on startup. It does not need to scan every time.",
         "Keep the puck on its UK-egress gateway. Install this service on that gateway box so TCP 8091 is local. Tailscale is only for the web UI.",
-        "Number keys are queued with a short gap so rapid channel entry is not dropped. Scan and Wake still lock the page.",
+        "Remote buttons queue a key and return immediately. The box is not waited on. Scan and Wake still lock the page.",
         "The first key after connecting used to fire before the box was ready. The session now settles after bind, and selecting a box pre-opens it.",
         "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private NICs.",
         "Select a discovered box before sending any remote command.",

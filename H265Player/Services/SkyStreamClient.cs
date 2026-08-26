@@ -5,6 +5,7 @@ using System.Net.WebSockets;
 using System.Security.Authentication;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 
 namespace H265Player.Services;
 
@@ -18,7 +19,12 @@ internal sealed class SkyStreamClient : IAsyncDisposable
     private readonly string _host;
     private readonly int _port;
     private readonly Action<string>? _log;
-    private readonly SemaphoreSlim _io = new(1, 1);
+    private readonly Channel<WorkItem> _work = Channel.CreateUnbounded<WorkItem>(new UnboundedChannelOptions
+    {
+        SingleReader = true,
+        SingleWriter = false
+    });
+    private readonly CancellationTokenSource _runCts = new();
     private TcpClient? _tcp;
     private SslStream? _ssl;
     private WebSocket? _socket;
@@ -26,6 +32,8 @@ internal sealed class SkyStreamClient : IAsyncDisposable
     private string _controllerNonce = Guid.NewGuid().ToString();
     private string? _authToken;
     private int? _bindId;
+    private int _sequenceGeneration;
+    private Task? _run;
 
     public SkyStreamClient(string host, int port = SkyStreamCredentials.Port, Action<string>? log = null)
     {
@@ -38,7 +46,135 @@ internal sealed class SkyStreamClient : IAsyncDisposable
 
     public bool IsBound => _socket is { State: WebSocketState.Open } && _bindId is not null && !string.IsNullOrWhiteSpace(_authToken);
 
-    public async Task ConnectAndBindAsync(CancellationToken cancellationToken)
+    public void Start()
+    {
+        _run ??= Task.Run(() => RunAsync(_runCts.Token));
+    }
+
+    public void Warm()
+    {
+        Start();
+        _work.Writer.TryWrite(WorkItem.Connect);
+    }
+
+    public void QueueUserKey(string key, int settleMs)
+    {
+        Start();
+        Interlocked.Increment(ref _sequenceGeneration);
+        _work.Writer.TryWrite(WorkItem.UserKey(key, Math.Max(0, settleMs)));
+    }
+
+    public int BeginSequence()
+    {
+        Start();
+        return Interlocked.Increment(ref _sequenceGeneration);
+    }
+
+    public void QueueSequenceStroke(int generation, string? key, int settleMs)
+    {
+        Start();
+        _work.Writer.TryWrite(WorkItem.SequenceStroke(generation, key, Math.Max(0, settleMs)));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _work.Writer.TryComplete();
+        try
+        {
+            _runCts.Cancel();
+        }
+        catch
+        {
+        }
+
+        CloseSocket();
+        if (_run is not null)
+        {
+            try
+            {
+                await _run.WaitAsync(TimeSpan.FromSeconds(1));
+            }
+            catch
+            {
+            }
+        }
+
+        _runCts.Dispose();
+        _tcp?.Dispose();
+        _tcp = null;
+    }
+
+    private async Task RunAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var item in _work.Reader.ReadAllAsync(cancellationToken))
+            {
+                if (item.IsSequence && item.Generation != Volatile.Read(ref _sequenceGeneration))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await EnsureBoundAsync(cancellationToken);
+                    if (!string.IsNullOrEmpty(item.KeyName))
+                    {
+                        await SendKeyNowAsync(item.KeyName, cancellationToken);
+                    }
+
+                    if (item.SettleMs > 0)
+                    {
+                        await Task.Delay(item.SettleMs, cancellationToken);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Log($"Send failed: {ex.Message}. Reconnecting.");
+                    CloseSocket();
+                    if (string.IsNullOrEmpty(item.KeyName) || IsTcpUnreachable(ex))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        await EnsureBoundAsync(cancellationToken);
+                        await SendKeyNowAsync(item.KeyName, cancellationToken);
+                    }
+                    catch (Exception retry)
+                    {
+                        Log($"Retry failed: {retry.Message}");
+                        CloseSocket();
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log($"Key worker stopped: {ex.Message}");
+        }
+    }
+
+    private async Task EnsureBoundAsync(CancellationToken cancellationToken)
+    {
+        if (IsBound)
+        {
+            return;
+        }
+
+        CloseSocket();
+        await ConnectAndBindAsync(cancellationToken);
+    }
+
+    private async Task ConnectAndBindAsync(CancellationToken cancellationToken)
     {
         await ConnectAsync(cancellationToken);
         Log("Sending Pair Request.");
@@ -54,15 +190,11 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         Log(string.IsNullOrWhiteSpace(DeviceName) ? "Paired." : $"Paired with {DeviceName}.");
         Log("Sending Bind Request.");
         await BindAsync(pairingCode, stbNonce, cancellationToken);
-        Log($"Bound bind_id={_bindId}. Waiting for the box to accept keys.");
+        Log($"Bound bind_id={_bindId}. Keys are queued and sent without waiting for a box reply.");
         await Task.Delay(400, cancellationToken);
-        Log("Session ready. Keys are sent without waiting for a box reply.");
     }
 
-    public Task SendKeyAsync(string key, CancellationToken cancellationToken) =>
-        SendKeyNoWaitAsync(key, cancellationToken);
-
-    public async Task SendKeyNoWaitAsync(string key, CancellationToken cancellationToken)
+    private async Task SendKeyNowAsync(string key, CancellationToken cancellationToken)
     {
         if (!IsBound)
         {
@@ -78,10 +210,10 @@ internal sealed class SkyStreamClient : IAsyncDisposable
             ["cmd"] = "keyatomic",
             ["key"] = key
         }, cancellationToken);
-        Log($"Sent key {key}. Not waiting for a box reply.");
+        Log($"Sent key {key}.");
     }
 
-    public async ValueTask DisposeAsync()
+    private void CloseSocket()
     {
         try
         {
@@ -92,19 +224,15 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         }
 
         _socket?.Dispose();
-        if (_ssl is not null)
+        try
         {
-            try
-            {
-                await _ssl.DisposeAsync();
-            }
-            catch
-            {
-            }
+            _ssl?.Dispose();
+        }
+        catch
+        {
         }
 
         _tcp?.Dispose();
-        _io.Dispose();
         _socket = null;
         _ssl = null;
         _tcp = null;
@@ -245,82 +373,47 @@ internal sealed class SkyStreamClient : IAsyncDisposable
             throw new InvalidOperationException("Sky Stream WebSocket is not open.");
         }
 
-        await _io.WaitAsync(cancellationToken);
-        try
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, JsonOptions));
+        var send = _socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+        var timeout = Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        var completed = await Task.WhenAny(send, timeout);
+        if (completed != send)
         {
-            if (_socket is not { State: WebSocketState.Open })
+            CloseSocket();
+            try
             {
-                throw new InvalidOperationException("Sky Stream WebSocket is not open.");
+                await send;
+            }
+            catch
+            {
             }
 
-            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, JsonOptions));
-            var send = _socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
-            var timeout = Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            var completed = await Task.WhenAny(send, timeout);
-            if (completed != send)
-            {
-                try
-                {
-                    _socket.Abort();
-                }
-                catch
-                {
-                }
-
-                try
-                {
-                    await send;
-                }
-                catch
-                {
-                }
-
-                throw new TimeoutException("Sky Stream send timed out after 2s. Not waiting for a box reply.");
-            }
-
-            await send;
+            throw new TimeoutException("Sky Stream send timed out after 2s.");
         }
-        finally
-        {
-            _io.Release();
-        }
+
+        await send;
     }
 
     private async Task<JsonElement> ReceiveHandshakeAsync(CancellationToken cancellationToken)
     {
-        await _io.WaitAsync(cancellationToken);
-        try
+        var receive = ReceiveJsonAsync(CancellationToken.None);
+        var timeout = Task.Delay(TimeSpan.FromSeconds(8), cancellationToken);
+        var completed = await Task.WhenAny(receive, timeout);
+        if (completed != receive)
         {
-            var receive = ReceiveJsonAsync(CancellationToken.None);
-            var timeout = Task.Delay(TimeSpan.FromSeconds(8), cancellationToken);
-            var completed = await Task.WhenAny(receive, timeout);
-            if (completed != receive)
+            CloseSocket();
+            try
             {
-                try
-                {
-                    _socket?.Abort();
-                }
-                catch
-                {
-                }
-
-                try
-                {
-                    await receive;
-                }
-                catch
-                {
-                }
-
-                throw new TimeoutException("Sky Stream pair/bind did not reply in 8s.");
+                await receive;
+            }
+            catch
+            {
             }
 
-            return await receive;
+            throw new TimeoutException("Sky Stream pair/bind did not reply in 8s.");
         }
-        finally
-        {
-            _io.Release();
-        }
+
+        return await receive;
     }
 
     private async Task<JsonElement> ReceiveJsonAsync(CancellationToken cancellationToken)
@@ -376,6 +469,30 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         }
 
         throw new InvalidOperationException("Sky Stream HTTP upgrade response was too large.");
+    }
+
+    private static bool IsTcpUnreachable(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains("did not connect", StringComparison.OrdinalIgnoreCase) ||
+                current.Message.Contains("8091/tcp filtered", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private readonly record struct WorkItem(bool IsSequence, int Generation, string? KeyName, int SettleMs)
+    {
+        public static WorkItem Connect => new(false, 0, null, 0);
+
+        public static WorkItem UserKey(string key, int settleMs) => new(false, 0, key, settleMs);
+
+        public static WorkItem SequenceStroke(int generation, string? key, int settleMs) =>
+            new(true, generation, key, settleMs);
     }
 }
 

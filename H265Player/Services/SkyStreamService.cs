@@ -47,12 +47,21 @@ public sealed class SkyStreamService : IDisposable
         ["9"] = "Digit9"
     };
 
+    private static readonly (string Command, int SettleMs)[] GuideStrokes =
+    [
+        ("home", 2800),
+        ("down", 500),
+        ("down", 1000),
+        ("select", 900),
+        ("", 900),
+        ("", 900),
+        ("right", 800),
+        ("down", 800)
+    ];
+
     private readonly SemaphoreSlim _scanLock = new(1, 1);
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _commandLocks = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _sequenceCts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, long> _nextKeyAt = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _lastWasDigit = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, Lazy<Task<SkyStreamClient>>> _sessions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SkyStreamClient> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _cachePath;
     private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
     private readonly ILogger<SkyStreamService> _logger;
@@ -105,383 +114,137 @@ public sealed class SkyStreamService : IDisposable
         }
     }
 
-    public async Task<SkyQCommandResult> SendCommandAsync(string host, string command, CancellationToken cancellationToken)
+    public Task<SkyQCommandResult> SendCommandAsync(string host, string command, CancellationToken cancellationToken)
     {
-        if (!IPAddress.TryParse(host, out var address) ||
-            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
+        if (!TryHost(host, out _))
         {
-            return new SkyQCommandResult(false, host, command, "Sky Stream control is limited to private IPv4 addresses.", []);
+            return Task.FromResult(new SkyQCommandResult(false, host, command, "Sky Stream control is limited to private IPv4 addresses.", []));
         }
 
         if (string.Equals(command, "tvguide", StringComparison.OrdinalIgnoreCase))
         {
-            return await OpenGuideAsync(host, cancellationToken);
+            return OpenGuideAsync(host, cancellationToken);
         }
 
         if (!Commands.TryGetValue(command, out var key))
         {
-            return new SkyQCommandResult(false, host, command, $"Unknown Sky Stream command '{command}'.", []);
+            return Task.FromResult(new SkyQCommandResult(false, host, command, $"Unknown Sky Stream command '{command}'.", []));
         }
-
-        var logs = new List<string>
-        {
-            $"Target={host}:{SkyStreamCredentials.Port}",
-            $"Command={command}",
-            $"Key={key}"
-        };
 
         var hostKey = host.Trim();
-        var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
-        try
-        {
-            var isDigit = command.Length == 1 && char.IsDigit(command[0]);
-            var continuingDigits = isDigit && _lastWasDigit.TryGetValue(hostKey, out var previousDigit) && previousDigit;
-            var gap = isDigit
-                ? (continuingDigits ? DigitKeyGap : FirstDigitGap)
-                : OtherKeyGap;
-            if (_nextKeyAt.TryGetValue(hostKey, out var next))
-            {
-                var wait = next - Environment.TickCount64;
-                if (wait > 0)
-                {
-                    logs.Add($"Spacing {wait}ms before {command}.");
-                    await Task.Delay((int)Math.Min(wait, 2000), cancellationToken);
-                }
-            }
-
-            if (isDigit && !continuingDigits)
-            {
-                logs.Add($"Waiting {FirstDigitGap.TotalMilliseconds:0}ms before first digit.");
-                await Task.Delay(FirstDigitGap, cancellationToken);
-            }
-
-            await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
-            logs.Add("Key sent. Not waiting for a box reply.");
-            await Task.Delay(gap, cancellationToken);
-            _nextKeyAt[hostKey] = Environment.TickCount64;
-            _lastWasDigit[hostKey] = isDigit;
-            return new SkyQCommandResult(true, host, command, "Command sent.", logs);
-        }
-        catch (Exception ex)
-        {
-            logs.Add($"{ex.GetType().Name}: {ex.Message}");
-            return new SkyQCommandResult(false, host, command, ex.Message, logs);
-        }
-        finally
-        {
-            gate.Release();
-        }
+        var isDigit = command.Length == 1 && char.IsDigit(command[0]);
+        var continuingDigits = isDigit && _lastWasDigit.TryGetValue(hostKey, out var previousDigit) && previousDigit;
+        var settle = isDigit
+            ? (continuingDigits ? DigitKeyGap : FirstDigitGap)
+            : OtherKeyGap;
+        GetClient(hostKey).QueueUserKey(key, (int)settle.TotalMilliseconds);
+        _lastWasDigit[hostKey] = isDigit;
+        return Task.FromResult(new SkyQCommandResult(
+            true,
+            host,
+            command,
+            "Queued.",
+            [$"Target={host}:{SkyStreamCredentials.Port}", $"Command={command}", $"Key={key}", "Queued. Not waiting for a box reply."]));
     }
 
-    public async Task<SkyQCommandResult> TuneLiveChannelAsync(string host, int channelNumber, CancellationToken cancellationToken)
+    public Task<SkyQCommandResult> TuneLiveChannelAsync(string host, int channelNumber, CancellationToken cancellationToken)
     {
         if (channelNumber is < 1 or > 9999)
         {
-            return new SkyQCommandResult(false, host, "livetv", $"Invalid channel number {channelNumber}.", []);
+            return Task.FromResult(new SkyQCommandResult(false, host, "livetv", $"Invalid channel number {channelNumber}.", []));
         }
 
-        if (!IPAddress.TryParse(host, out var address) ||
-            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
+        if (!TryHost(host, out _))
         {
-            return new SkyQCommandResult(false, host, "livetv", "Sky Stream control is limited to private IPv4 addresses.", []);
-        }
-
-        var logs = new List<string>
-        {
-            $"Target={host}:{SkyStreamCredentials.Port}",
-            $"Live TV channel={channelNumber}",
-            "Calling Guide, then pause, channel number, OK, OK"
-        };
-
-        var guide = await OpenGuideAsync(host, cancellationToken);
-        logs.AddRange(guide.Logs);
-        logs.Add($"Guide: {guide.Message}");
-        if (string.Equals(guide.Message, "Superseded by a newer command.", StringComparison.Ordinal))
-        {
-            return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
-        }
-
-        if (!guide.Success)
-        {
-            return new SkyQCommandResult(false, host, "livetv", guide.Message, logs);
+            return Task.FromResult(new SkyQCommandResult(false, host, "livetv", "Sky Stream control is limited to private IPv4 addresses.", []));
         }
 
         var hostKey = host.Trim();
-        var waitCts = PreemptSequence(hostKey, cancellationToken);
-        try
+        var client = GetClient(hostKey);
+        var generation = client.BeginSequence();
+        QueueGuideStrokes(client, generation);
+        client.QueueSequenceStroke(generation, null, 2000);
+        var firstDigit = true;
+        foreach (var digit in channelNumber.ToString())
         {
-            logs.Add("Waiting after Guide before the channel number.");
-            await Task.Delay(2000, waitCts.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            CompleteSequence(hostKey, waitCts);
-            return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
+            QueueMappedStroke(client, generation, digit.ToString(), (int)(firstDigit ? FirstDigitGap : DigitKeyGap).TotalMilliseconds);
+            firstDigit = false;
+            _lastWasDigit[hostKey] = true;
         }
 
-        CompleteSequence(hostKey, waitCts);
+        QueueMappedStroke(client, generation, "select", (int)OtherKeyGap.TotalMilliseconds);
+        QueueMappedStroke(client, generation, "select", (int)OtherKeyGap.TotalMilliseconds);
+        _lastWasDigit[hostKey] = false;
+        return Task.FromResult(new SkyQCommandResult(
+            true,
+            host,
+            "livetv",
+            $"Tuning live TV {channelNumber}.",
+            [$"Target={host}:{SkyStreamCredentials.Port}", $"Live TV channel={channelNumber}", "Queued Guide, pause, channel number, OK, OK."]));
+    }
 
-        try
+    public Task<SkyQCommandResult> OpenGuideAsync(string host, CancellationToken cancellationToken)
+    {
+        if (!TryHost(host, out _))
         {
-            foreach (var digit in channelNumber.ToString())
+            return Task.FromResult(new SkyQCommandResult(false, host, "tvguide", "Sky Stream control is limited to private IPv4 addresses.", []));
+        }
+
+        var client = GetClient(host.Trim());
+        QueueGuideStrokes(client, client.BeginSequence());
+        return Task.FromResult(new SkyQCommandResult(
+            true,
+            host,
+            "tvguide",
+            "Opening guide.",
+            [$"Target={host}:{SkyStreamCredentials.Port}", "Queued Home, wait, Down, Down, wait, OK, wait, wait, wait, Right, wait, Down."]));
+    }
+
+    public Task WarmAsync(string host, CancellationToken cancellationToken)
+    {
+        if (!TryHost(host, out _))
+        {
+            return Task.CompletedTask;
+        }
+
+        GetClient(host.Trim()).Warm();
+        return Task.CompletedTask;
+    }
+
+    private bool TryHost(string host, out IPAddress address) =>
+        IPAddress.TryParse(host, out address) &&
+        PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks);
+
+    private SkyStreamClient GetClient(string host) =>
+        _sessions.GetOrAdd(host, key =>
+        {
+            var client = new SkyStreamClient(key, log: message => _logger.LogInformation("Sky Stream {Host}: {Message}", key, message));
+            client.Start();
+            return client;
+        });
+
+    private void QueueGuideStrokes(SkyStreamClient client, int generation)
+    {
+        foreach (var stroke in GuideStrokes)
+        {
+            if (string.IsNullOrEmpty(stroke.Command))
             {
-                var step = await SendCommandAsync(host, digit.ToString(), cancellationToken);
-                logs.AddRange(step.Logs);
-                if (string.Equals(step.Message, "Superseded by a newer command.", StringComparison.Ordinal))
-                {
-                    return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
-                }
+                client.QueueSequenceStroke(generation, null, stroke.SettleMs);
+                continue;
             }
 
-            var ok1 = await SendCommandAsync(host, "select", cancellationToken);
-            logs.AddRange(ok1.Logs);
-            var ok2 = await SendCommandAsync(host, "select", cancellationToken);
-            logs.AddRange(ok2.Logs);
-
-            return new SkyQCommandResult(true, host, "livetv", $"Tuning live TV {channelNumber}.", logs);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            logs.Add("Superseded by a newer command.");
-            return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
-        }
-        catch (Exception ex)
-        {
-            logs.Add($"{ex.GetType().Name}: {ex.Message}");
-            return new SkyQCommandResult(false, host, "livetv", ex.Message, logs);
+            QueueMappedStroke(client, generation, stroke.Command, stroke.SettleMs);
         }
     }
 
-    public async Task<SkyQCommandResult> OpenGuideAsync(string host, CancellationToken cancellationToken)
-    {
-        if (!IPAddress.TryParse(host, out var address) ||
-            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
-        {
-            return new SkyQCommandResult(false, host, "tvguide", "Sky Stream control is limited to private IPv4 addresses.", []);
-        }
-
-        var logs = new List<string>
-        {
-            $"Target={host}:{SkyStreamCredentials.Port}",
-            "Sequence=Home, wait, Down, Down, wait, OK, wait, wait, wait, Right, wait, Down"
-        };
-
-        var hostKey = host.Trim();
-        var sequence = PreemptSequence(hostKey, cancellationToken);
-        var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
-        try
-        {
-            await gate.WaitAsync(sequence.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            CompleteSequence(hostKey, sequence);
-            return new SkyQCommandResult(true, host, "tvguide", "Superseded by a newer command.", logs);
-        }
-
-        try
-        {
-            await SendGuidePathAsync(hostKey, logs, sequence.Token);
-            return new SkyQCommandResult(true, host, "tvguide", "Opening guide.", logs);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            logs.Add("Superseded by a newer command.");
-            return new SkyQCommandResult(true, host, "tvguide", "Superseded by a newer command.", logs);
-        }
-        catch (Exception ex)
-        {
-            logs.Add($"{ex.GetType().Name}: {ex.Message}");
-            return new SkyQCommandResult(false, host, "tvguide", ex.Message, logs);
-        }
-        finally
-        {
-            gate.Release();
-            CompleteSequence(hostKey, sequence);
-        }
-    }
-
-    private async Task SendGuidePathAsync(string host, List<string> logs, CancellationToken cancellationToken)
-    {
-        await SendKeyedAsync(host, "home", 2800, logs, cancellationToken);
-        await SendKeyedAsync(host, "down", 500, logs, cancellationToken);
-        await SendKeyedAsync(host, "down", 1000, logs, cancellationToken);
-        await SendKeyedAsync(host, "select", 900, logs, cancellationToken);
-        await Task.Delay(900, cancellationToken);
-        await Task.Delay(900, cancellationToken);
-        await SendKeyedAsync(host, "right", 800, logs, cancellationToken);
-        await SendKeyedAsync(host, "down", 800, logs, cancellationToken);
-    }
-
-    private async Task SendKeyedAsync(
-        string host,
-        string command,
-        int settleMs,
-        List<string> logs,
-        CancellationToken cancellationToken)
+    private void QueueMappedStroke(SkyStreamClient client, int generation, string command, int settleMs)
     {
         if (!Commands.TryGetValue(command, out var key))
         {
-            logs.Add($"Unknown command '{command}'.");
             return;
         }
 
-        logs.Add($"Key={key}");
-        var client = await GetClientAsync(host, logs, cancellationToken);
-        await client.SendKeyNoWaitAsync(key, cancellationToken);
-        logs.Add("Key sent.");
-        _nextKeyAt[host] = Environment.TickCount64 + settleMs;
-        _lastWasDigit[host] = command.Length == 1 && char.IsDigit(command[0]);
-        if (settleMs > 0)
-        {
-            await Task.Delay(settleMs, cancellationToken);
-        }
-    }
-
-    private CancellationTokenSource PreemptSequence(string host, CancellationToken outer)
-    {
-        var next = CancellationTokenSource.CreateLinkedTokenSource(outer);
-        if (_sequenceCts.TryGetValue(host, out var previous) && !ReferenceEquals(previous, next))
-        {
-            try
-            {
-                previous.Cancel();
-            }
-            catch
-            {
-            }
-        }
-
-        _sequenceCts[host] = next;
-        return next;
-    }
-
-    private void CompleteSequence(string host, CancellationTokenSource owned)
-    {
-        if (_sequenceCts.TryGetValue(host, out var current) && ReferenceEquals(current, owned))
-        {
-            _sequenceCts.TryRemove(host, out _);
-        }
-
-        try
-        {
-            owned.Dispose();
-        }
-        catch
-        {
-        }
-    }
-
-    public async Task WarmAsync(string host, CancellationToken cancellationToken)
-    {
-        if (!IPAddress.TryParse(host, out var address) ||
-            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
-        {
-            return;
-        }
-
-        var hostKey = host.Trim();
-        var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
-        try
-        {
-            await GetClientAsync(hostKey, [], cancellationToken);
-        }
-        finally
-        {
-            gate.Release();
-        }
-    }
-
-    private async Task SendKeyWithRetryAsync(
-        string host,
-        string key,
-        List<string> logs,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var client = await GetClientAsync(host, logs, cancellationToken);
-            await client.SendKeyAsync(key, cancellationToken);
-        }
-        catch (Exception first)
-        {
-            logs.Add($"First attempt failed: {first.Message}");
-            if (IsTcpUnreachable(first))
-            {
-                throw;
-            }
-
-            await DropSessionAsync(host);
-            var client = await GetClientAsync(host, logs, cancellationToken);
-            await client.SendKeyAsync(key, cancellationToken);
-        }
-    }
-
-    private async Task<SkyStreamClient> GetClientAsync(string host, List<string> logs, CancellationToken cancellationToken)
-    {
-        var lazy = _sessions.GetOrAdd(host, _ => new Lazy<Task<SkyStreamClient>>(() => OpenAsync(host, logs, cancellationToken)));
-        try
-        {
-            var client = await lazy.Value;
-            if (client.IsBound)
-            {
-                return client;
-            }
-
-            logs.Add("Session was no longer bound; opening a new one.");
-        }
-        catch
-        {
-            _sessions.TryRemove(host, out _);
-            throw;
-        }
-
-        await DropSessionAsync(host);
-        lazy = _sessions.GetOrAdd(host, _ => new Lazy<Task<SkyStreamClient>>(() => OpenAsync(host, logs, cancellationToken)));
-        try
-        {
-            return await lazy.Value;
-        }
-        catch
-        {
-            _sessions.TryRemove(host, out _);
-            throw;
-        }
-    }
-
-    private async Task<SkyStreamClient> OpenAsync(string host, List<string> logs, CancellationToken cancellationToken)
-    {
-        logs.Add("Opening mTLS WebSocket to /iptarget.");
-        var client = new SkyStreamClient(host, log: logs.Add);
-        try
-        {
-            await client.ConnectAndBindAsync(cancellationToken);
-            logs.Add(string.IsNullOrWhiteSpace(client.DeviceName)
-                ? "Paired and bound."
-                : $"Paired and bound to {client.DeviceName}.");
-            return client;
-        }
-        catch
-        {
-            await client.DisposeAsync();
-            throw;
-        }
-    }
-
-    private static bool IsTcpUnreachable(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            if (current.Message.Contains("did not connect", StringComparison.OrdinalIgnoreCase) ||
-                current.Message.Contains("8091/tcp filtered", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        client.QueueSequenceStroke(generation, key, settleMs);
     }
 
     public async Task<SkyQCommandResult> WakeAsync(string host, string? macAddress, CancellationToken cancellationToken)
@@ -609,21 +372,11 @@ public sealed class SkyStreamService : IDisposable
         return PrivateIpv4.DirectedBroadcast(host, 24);
     }
 
-    private async Task DropSessionAsync(string host)
+    private void DropSession(string host)
     {
-        if (_sessions.TryRemove(host, out var lazy))
+        if (_sessions.TryRemove(host, out var client))
         {
-            try
-            {
-                if (lazy.IsValueCreated)
-                {
-                    var client = await lazy.Value;
-                    await client.DisposeAsync();
-                }
-            }
-            catch
-            {
-            }
+            _ = client.DisposeAsync();
         }
     }
 
@@ -926,25 +679,9 @@ public sealed class SkyStreamService : IDisposable
     {
         foreach (var host in _sessions.Keys.ToArray())
         {
-            _ = DropSessionAsync(host);
-        }
-
-        foreach (var cts in _sequenceCts.Values)
-        {
-            try
-            {
-                cts.Cancel();
-                cts.Dispose();
-            }
-            catch
-            {
-            }
+            DropSession(host);
         }
 
         _scanLock.Dispose();
-        foreach (var gate in _commandLocks.Values)
-        {
-            gate.Dispose();
-        }
     }
 }
