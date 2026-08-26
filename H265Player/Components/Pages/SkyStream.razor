@@ -175,7 +175,8 @@
         "Send Home runs the real Sky Remote pair/bind/Home sequence. nmap 8091/tcp filtered means the puck is still not offering Sky Remote — wake it on the LAN until that port is open.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts.",
-        "Live TV is a shortcut for Home, Down, Down, OK, Down, OK, Down, channel number, OK, OK. Numbers follow the Sky Stream / Glass UK EPG, not Sky Q satellite."
+        "Live TV is a shortcut for Home, Down, Down, OK, Down, OK, Down, channel number, OK, OK. Numbers follow the Sky Stream / Glass UK EPG, not Sky Q satellite.",
+        "Guide walks Home, Down, Down, OK, OK, Down instead of sending the Sky Q guide key, which Stream does not use."
     ];
 
     private SkyStreamScanResponse? ScanResult { get; set; }
@@ -192,7 +193,7 @@
     [
         new("Power", "power"),
         new("Home", "home"),
-        new("Menu", "tvguide"),
+        new("Guide", "tvguide"),
         new("Search", "search"),
         new("Dismiss", "dismiss"),
         new("Back", "backup")
