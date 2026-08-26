@@ -9,7 +9,7 @@ Log($"Sky Stream Home probe → {host}:8091 key={key}");
 await using var client = new SkyStreamClient(host, log: Log);
 try
 {
-    client.QueueUserKey(key, 500);
+    client.Enqueue(key, 500, replaceMacro: true);
     await Task.Delay(TimeSpan.FromSeconds(4));
     Log("Key queued without waiting for a box reply.");
     return 0;

@@ -51,29 +51,21 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         _run ??= Task.Run(() => RunAsync(_runCts.Token));
     }
 
-    public void Warm()
-    {
-        Start();
-        _work.Writer.TryWrite(WorkItem.Connect);
-    }
+    public void Warm() => Enqueue(protocolKey: null, settleMs: 0, replaceMacro: false);
 
-    public void QueueUserKey(string key, int settleMs)
+    public void Enqueue(string? protocolKey, int settleMs, bool replaceMacro)
     {
         Start();
-        Interlocked.Increment(ref _sequenceGeneration);
-        _work.Writer.TryWrite(WorkItem.UserKey(key, Math.Max(0, settleMs)));
-    }
+        if (replaceMacro)
+        {
+            Interlocked.Increment(ref _sequenceGeneration);
+        }
 
-    public int BeginSequence()
-    {
-        Start();
-        return Interlocked.Increment(ref _sequenceGeneration);
-    }
-
-    public void QueueSequenceStroke(int generation, string? key, int settleMs)
-    {
-        Start();
-        _work.Writer.TryWrite(WorkItem.SequenceStroke(generation, key, Math.Max(0, settleMs)));
+        _work.Writer.TryWrite(new WorkItem(
+            IsMacro: !replaceMacro,
+            Generation: Volatile.Read(ref _sequenceGeneration),
+            KeyName: protocolKey,
+            SettleMs: Math.Max(0, settleMs)));
     }
 
     public async ValueTask DisposeAsync()
@@ -110,7 +102,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         {
             await foreach (var item in _work.Reader.ReadAllAsync(cancellationToken))
             {
-                if (item.IsSequence && item.Generation != Volatile.Read(ref _sequenceGeneration))
+                if (item.IsMacro && item.Generation != Volatile.Read(ref _sequenceGeneration))
                 {
                     continue;
                 }
@@ -485,15 +477,7 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         return false;
     }
 
-    private readonly record struct WorkItem(bool IsSequence, int Generation, string? KeyName, int SettleMs)
-    {
-        public static WorkItem Connect => new(false, 0, null, 0);
-
-        public static WorkItem UserKey(string key, int settleMs) => new(false, 0, key, settleMs);
-
-        public static WorkItem SequenceStroke(int generation, string? key, int settleMs) =>
-            new(true, generation, key, settleMs);
-    }
+    private readonly record struct WorkItem(bool IsMacro, int Generation, string? KeyName, int SettleMs);
 }
 
 internal static class JsonElementExtensions
