@@ -200,10 +200,10 @@ public sealed class SkyStreamService : IDisposable
                 return ok;
             }
 
-            if (!await SendAsync("home", 2200) ||
+            if (!await SendAsync("home", 2600) ||
                 !await SendAsync("down", 280) ||
-                !await SendAsync("down", 450) ||
-                !await SendAsync("select", 1100) ||
+                !await SendAsync("down", 800) ||
+                !await SendAsync("select", 1400) ||
                 !await SendAsync("down", 350) ||
                 !await SendAsync("select", 1100) ||
                 !await SendAsync("down", 500))
