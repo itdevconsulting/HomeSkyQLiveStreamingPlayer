@@ -264,7 +264,7 @@ public sealed class SkyStreamService : IDisposable
         var logs = new List<string>
         {
             $"Target={host}:{SkyStreamCredentials.Port}",
-            "Sequence=Home, wait, Down, Down, wait, OK, wait, wait, wait, Down"
+            "Sequence=Home, wait, Down, Down, wait, OK, wait, wait, wait, Right, wait, Down"
         };
 
         var hostKey = host.Trim();
@@ -310,6 +310,7 @@ public sealed class SkyStreamService : IDisposable
         await SendKeyedAsync(host, "select", 900, logs, cancellationToken);
         await Task.Delay(900, cancellationToken);
         await Task.Delay(900, cancellationToken);
+        await SendKeyedAsync(host, "right", 800, logs, cancellationToken);
         await SendKeyedAsync(host, "down", 800, logs, cancellationToken);
     }
 
