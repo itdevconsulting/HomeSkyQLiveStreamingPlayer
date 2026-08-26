@@ -156,10 +156,12 @@ public sealed class SkyStreamService : IDisposable
             }
 
             var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
-            _nextKeyAt[hostKey] = Environment.TickCount64 + (long)gap.TotalMilliseconds;
+            logs.Add("Key sent. Waiting before the next command.");
+            await Task.Delay(gap, cancellationToken);
+            _nextKeyAt[hostKey] = Environment.TickCount64;
             _lastWasDigit[hostKey] = isDigit;
             var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
-            logs.Add(ok ? "Key accepted." : $"Box response: {response}");
+            logs.Add(ok ? "Key sent." : $"Box response: {response}");
             return new SkyQCommandResult(ok, host, command, ok ? "Command sent." : "Sky Stream rejected the key.", logs);
         }
         catch (Exception ex)
@@ -263,7 +265,7 @@ public sealed class SkyStreamService : IDisposable
         var logs = new List<string>
         {
             $"Target={host}:{SkyStreamCredentials.Port}",
-            "Sequence=Home, Down, Down, Select, Select, Select"
+            "Sequence=Home, wait, Down, Down, wait, OK, wait, wait, wait, Down"
         };
 
         var hostKey = host.Trim();
@@ -304,11 +306,12 @@ public sealed class SkyStreamService : IDisposable
     private async Task SendGuidePathAsync(string host, List<string> logs, CancellationToken cancellationToken)
     {
         await SendKeyedAsync(host, "home", 2800, logs, cancellationToken);
-        await SendKeyedAsync(host, "down", 700, logs, cancellationToken);
+        await SendKeyedAsync(host, "down", 500, logs, cancellationToken);
         await SendKeyedAsync(host, "down", 1000, logs, cancellationToken);
-        await SendKeyedAsync(host, "select", 1600, logs, cancellationToken);
-        await SendKeyedAsync(host, "select", 1400, logs, cancellationToken);
-        await SendKeyedAsync(host, "select", 800, logs, cancellationToken);
+        await SendKeyedAsync(host, "select", 900, logs, cancellationToken);
+        await Task.Delay(900, cancellationToken);
+        await Task.Delay(900, cancellationToken);
+        await SendKeyedAsync(host, "down", 800, logs, cancellationToken);
     }
 
     private async Task SendKeyedAsync(

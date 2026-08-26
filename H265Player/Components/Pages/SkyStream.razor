@@ -175,8 +175,8 @@
         "Send Home runs the real Sky Remote pair/bind/Home sequence. nmap 8091/tcp filtered means the puck is still not offering Sky Remote — wake it on the LAN until that port is open.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts.",
-        "Live TV presses the same Guide action as the Guide button, waits, types the channel number, then OK, OK.",
-        "Guide walks Home, Down, Down, OK, OK, OK. Pressing Guide again cancels whatever the remote is already sending."
+        "Live TV presses Guide, waits, then types the channel number and OK, OK.",
+        "Guide is Home, wait, Down, Down, wait, OK, wait, wait, wait, Down."
     ];
 
     private SkyStreamScanResponse? ScanResult { get; set; }
