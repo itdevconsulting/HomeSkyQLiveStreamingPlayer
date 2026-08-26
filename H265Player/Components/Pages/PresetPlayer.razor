@@ -27,7 +27,12 @@ else
                     <button type="button" class="preset-icon-button preset-icon-button-play" @onclick="GoAsync" title="Play">
                         <span class="play-icon" aria-hidden="true"></span>
                     </button>
-                    <SkyQMiniRemote Title="@RemoteTitle" ButtonCssClass="preset-icon-button preset-icon-button-remote" PositionKey="preset-player" OnCommand="SendCommandAsync">
+                    <SkyQMiniRemote Title="@RemoteTitle"
+                                    ButtonCssClass="preset-icon-button preset-icon-button-remote"
+                                    PositionKey="preset-player"
+                                    ShowLiveTv="@IsSkyStream"
+                                    OnCommand="SendCommandAsync"
+                                    OnLiveChannel="TuneLiveChannelAsync">
                         <ButtonContent>
                             <span class="remote-icon" aria-hidden="true">
                                 <span class="remote-icon-screen"></span>
@@ -120,6 +125,7 @@ else
         "Buffer sets one of five browser buffering presets for Direct and HLS playback. Higher values trade latency for stability.",
         "Size scales the picture from a small window up to Fit, which uses the remaining space beside the sidebar.",
         "Remote opens a draggable mini remote tied to the saved Sky Q or Sky Stream box for this preset.",
+        "On Sky Stream presets, Live TV jumps to a channel through the Home menu instead of fighting the Stream remote.",
         "Keyboard arrows, numbers, Enter, Esc, and Space are captured only while that mini remote is on screen, so the video player keeps its own keys the rest of the time.",
         "Edit names, stream URLs, or box associations on the Presets page."
     ];
@@ -139,10 +145,13 @@ else
     private bool RequiresSetup => _preset is { SourceType: "ffmpeg" or "rtsp" } && !LocalSetupStore.IsConfigured();
     private bool SupportsAdjustableBuffering => _preset is { SourceType: "direct" or "hls" };
 
+    private bool IsSkyStream =>
+        _preset is not null && SkyRemoteKinds.Normalize(_preset.RemoteKind) == SkyRemoteKinds.SkyStream;
+
     private string RemoteTitle =>
         _preset is null
             ? "Remote"
-            : SkyRemoteKinds.Normalize(_preset.RemoteKind) == SkyRemoteKinds.SkyStream
+            : IsSkyStream
                 ? string.IsNullOrWhiteSpace(_preset.SkyQHostName) ? "Sky Stream" : _preset.SkyQHostName
                 : string.IsNullOrWhiteSpace(_preset.SkyQHostName) ? "Sky Q" : _preset.SkyQHostName;
 
@@ -300,10 +309,23 @@ else
             return;
         }
 
-        var result = SkyRemoteKinds.Normalize(_preset.RemoteKind) == SkyRemoteKinds.SkyStream
+        var result = IsSkyStream
             ? await SkyStreamService.SendCommandAsync(_preset.SkyQHost, command, CancellationToken.None)
             : await SkyQService.SendCommandAsync(_preset.SkyQHost, command, CancellationToken.None);
         _lastCommand = command;
+        _logText = string.Join(Environment.NewLine, new[] { result.Message }.Concat(result.Logs));
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task TuneLiveChannelAsync(int channelNumber)
+    {
+        if (_preset is null || !IsSkyStream)
+        {
+            return;
+        }
+
+        var result = await SkyStreamService.TuneLiveChannelAsync(_preset.SkyQHost, channelNumber, CancellationToken.None);
+        _lastCommand = $"livetv {channelNumber}";
         _logText = string.Join(Environment.NewLine, new[] { result.Message }.Concat(result.Logs));
         await InvokeAsync(StateHasChanged);
     }

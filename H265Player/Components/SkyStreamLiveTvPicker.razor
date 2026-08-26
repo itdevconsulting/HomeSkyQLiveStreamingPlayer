@@ -1,0 +1,93 @@
+@using H265Player.Models
+
+<div class="sky-stream-live-tv @(Compact ? "sky-stream-live-tv-compact" : string.Empty)">
+    @if (!Compact)
+    {
+        <label class="field">
+            <span>Live TV</span>
+            <input type="search"
+                   value="@_filter"
+                   disabled="@Disabled"
+                   placeholder="Search channels"
+                   autocomplete="off"
+                   spellcheck="false"
+                   @oninput="OnFilterChanged" />
+        </label>
+    }
+    else
+    {
+        <input type="search"
+               class="sky-stream-live-tv-search"
+               value="@_filter"
+               disabled="@Disabled"
+               placeholder="Find channel"
+               autocomplete="off"
+               spellcheck="false"
+               @oninput="OnFilterChanged" />
+    }
+
+    <select class="sky-stream-live-tv-select"
+            disabled="@Disabled"
+            value="@_selected"
+            @onchange="OnChannelChanged">
+        <option value="">@(Compact ? "Live TV…" : "Choose a channel")</option>
+        @foreach (var group in FilteredGroups)
+        {
+            <optgroup label="@group.Key">
+                @foreach (var channel in group)
+                {
+                    <option value="@channel.Number">@channel.Number @channel.Name</option>
+                }
+            </optgroup>
+        }
+    </select>
+</div>
+
+@code {
+    private string _filter = string.Empty;
+    private string _selected = string.Empty;
+
+    [Parameter]
+    public bool Compact { get; set; }
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
+    public EventCallback<int> OnChannel { get; set; }
+
+    private IEnumerable<IGrouping<string, SkyStreamChannel>> FilteredGroups
+    {
+        get
+        {
+            var query = _filter.Trim();
+            if (string.IsNullOrEmpty(query))
+            {
+                return SkyStreamChannels.Groups;
+            }
+
+            return SkyStreamChannels.All
+                .Where(channel =>
+                    channel.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    channel.Number.ToString().Contains(query, StringComparison.OrdinalIgnoreCase))
+                .GroupBy(channel => channel.Category);
+        }
+    }
+
+    private void OnFilterChanged(ChangeEventArgs args)
+    {
+        _filter = args.Value as string ?? string.Empty;
+    }
+
+    private async Task OnChannelChanged(ChangeEventArgs args)
+    {
+        var value = args.Value as string ?? string.Empty;
+        _selected = value;
+        if (!int.TryParse(value, out var number) || !OnChannel.HasDelegate)
+        {
+            return;
+        }
+
+        await OnChannel.InvokeAsync(number);
+    }
+}

@@ -29,6 +29,13 @@
             </button>
         </div>
 
+        @if (ShowLiveTv)
+        {
+            <div class="mini-remote-section mini-remote-live-tv">
+                <SkyStreamLiveTvPicker Compact="true" Disabled="@_tuningLiveTv" OnChannel="TuneLiveChannelAsync" />
+            </div>
+        }
+
         <div class="mini-remote-section mini-remote-top">
             @foreach (var command in TopCommands)
             {
@@ -157,6 +164,14 @@
     [Parameter]
     public string PositionKey { get; set; } = "default";
 
+    [Parameter]
+    public bool ShowLiveTv { get; set; }
+
+    [Parameter]
+    public EventCallback<int> OnLiveChannel { get; set; }
+
+    private bool _tuningLiveTv;
+
     private static readonly IReadOnlyList<RemoteCommand> TopCommands =
     [
         new("Power", "power", "power"),
@@ -241,6 +256,25 @@
     private Task SendRightAsync() => SendAsync("right");
 
     private Task SendSelectAsync() => SendAsync("select");
+
+    private async Task TuneLiveChannelAsync(int channelNumber)
+    {
+        if (!OnLiveChannel.HasDelegate)
+        {
+            return;
+        }
+
+        _tuningLiveTv = true;
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await OnLiveChannel.InvokeAsync(channelNumber);
+        }
+        finally
+        {
+            _tuningLiveTv = false;
+        }
+    }
 
     public void Dispose()
     {

@@ -154,6 +154,89 @@ public sealed class SkyStreamService : IDisposable
         }
     }
 
+    public async Task<SkyQCommandResult> TuneLiveChannelAsync(string host, int channelNumber, CancellationToken cancellationToken)
+    {
+        if (channelNumber is < 1 or > 9999)
+        {
+            return new SkyQCommandResult(false, host, "livetv", $"Invalid channel number {channelNumber}.", []);
+        }
+
+        if (!IPAddress.TryParse(host, out var address) ||
+            !PrivateIpv4.IsAllowedTarget(address, _setupStore.Get().ExtraScanNetworks))
+        {
+            return new SkyQCommandResult(false, host, "livetv", "Sky Stream control is limited to private IPv4 addresses.", []);
+        }
+
+        var logs = new List<string>
+        {
+            $"Target={host}:{SkyStreamCredentials.Port}",
+            $"Live TV channel={channelNumber}",
+            "Sequence=Home, Down, Down, Select, Down, Select, Down, digits, Select"
+        };
+
+        var hostKey = host.Trim();
+        var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            async Task<bool> SendAsync(string command, int settleMs)
+            {
+                if (!Commands.TryGetValue(command, out var key))
+                {
+                    logs.Add($"Unknown command '{command}'.");
+                    return false;
+                }
+
+                logs.Add($"Key={key}");
+                var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
+                var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
+                logs.Add(ok ? "Key accepted." : $"Box response: {response}");
+                _nextKeyAt[hostKey] = Environment.TickCount64 + settleMs;
+                if (settleMs > 0)
+                {
+                    await Task.Delay(settleMs, cancellationToken);
+                }
+
+                return ok;
+            }
+
+            if (!await SendAsync("home", 2200) ||
+                !await SendAsync("down", 280) ||
+                !await SendAsync("down", 450) ||
+                !await SendAsync("select", 1100) ||
+                !await SendAsync("down", 350) ||
+                !await SendAsync("select", 1100) ||
+                !await SendAsync("down", 500))
+            {
+                return new SkyQCommandResult(false, host, "livetv", "Live TV navigation was rejected before the channel number.", logs);
+            }
+
+            foreach (var digit in channelNumber.ToString())
+            {
+                if (!await SendAsync(digit.ToString(), 350))
+                {
+                    return new SkyQCommandResult(false, host, "livetv", $"Live TV failed while entering {channelNumber}.", logs);
+                }
+            }
+
+            if (!await SendAsync("select", 200))
+            {
+                return new SkyQCommandResult(false, host, "livetv", $"Live TV failed to confirm {channelNumber}.", logs);
+            }
+
+            return new SkyQCommandResult(true, host, "livetv", $"Tuning live TV {channelNumber}.", logs);
+        }
+        catch (Exception ex)
+        {
+            logs.Add($"{ex.GetType().Name}: {ex.Message}");
+            return new SkyQCommandResult(false, host, "livetv", ex.Message, logs);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task WarmAsync(string host, CancellationToken cancellationToken)
     {
         if (!IPAddress.TryParse(host, out var address) ||
