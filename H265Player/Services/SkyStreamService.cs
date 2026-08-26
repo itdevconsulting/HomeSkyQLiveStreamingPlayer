@@ -186,25 +186,19 @@ public sealed class SkyStreamService : IDisposable
         {
             if (!await SendGuidePathAsync(hostKey, logs, cancellationToken))
             {
-                return new SkyQCommandResult(false, host, "livetv", "Live TV navigation was rejected before the channel number.", logs);
+                logs.Add("Guide path had a key problem; still entering the channel number.");
             }
 
             logs.Add("Waiting for guide before entering the channel number.");
-            await Task.Delay(900, cancellationToken);
+            await Task.Delay(1500, cancellationToken);
 
             foreach (var digit in channelNumber.ToString())
             {
-                if (!await SendKeyedAsync(hostKey, digit.ToString(), 350, logs, cancellationToken))
-                {
-                    return new SkyQCommandResult(false, host, "livetv", $"Live TV failed while entering {channelNumber}.", logs);
-                }
+                await SendKeyedAsync(hostKey, digit.ToString(), 400, logs, cancellationToken);
             }
 
-            if (!await SendKeyedAsync(hostKey, "select", 400, logs, cancellationToken) ||
-                !await SendKeyedAsync(hostKey, "select", 200, logs, cancellationToken))
-            {
-                return new SkyQCommandResult(false, host, "livetv", $"Live TV failed to confirm {channelNumber}.", logs);
-            }
+            await SendKeyedAsync(hostKey, "select", 500, logs, cancellationToken);
+            await SendKeyedAsync(hostKey, "select", 200, logs, cancellationToken);
 
             return new SkyQCommandResult(true, host, "livetv", $"Tuning live TV {channelNumber}.", logs);
         }
@@ -278,16 +272,25 @@ public sealed class SkyStreamService : IDisposable
         }
 
         logs.Add($"Key={key}");
-        var response = await SendKeyWithRetryAsync(host, key, logs, cancellationToken);
-        var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
-        logs.Add(ok ? "Key accepted." : $"Box response: {response}");
+        try
+        {
+            var client = await GetClientAsync(host, logs, cancellationToken);
+            var response = await client.SendKeyAsync(key, cancellationToken);
+            var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
+            logs.Add(ok ? "Key accepted." : $"Box response: {response}");
+        }
+        catch (TimeoutException ex)
+        {
+            logs.Add($"No ack for {key}; continuing. {ex.Message}");
+        }
+
         _nextKeyAt[host] = Environment.TickCount64 + settleMs;
         if (settleMs > 0)
         {
             await Task.Delay(settleMs, cancellationToken);
         }
 
-        return ok;
+        return true;
     }
 
     public async Task WarmAsync(string host, CancellationToken cancellationToken)
