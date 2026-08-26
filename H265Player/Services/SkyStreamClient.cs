@@ -88,6 +88,25 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         }
     }
 
+    public async Task SendKeyNoWaitAsync(string key, CancellationToken cancellationToken)
+    {
+        if (!IsBound)
+        {
+            throw new InvalidOperationException("Sky Stream session is not bound.");
+        }
+
+        await SendJsonAsync(new Dictionary<string, object?>
+        {
+            ["command_name"] = "Key Command Request",
+            ["tid"] = Guid.NewGuid().ToString(),
+            ["authtoken"] = _authToken,
+            ["bind_id"] = _bindId,
+            ["cmd"] = "keyatomic",
+            ["key"] = key
+        }, cancellationToken);
+        Log($"Sent key {key} without waiting for ack.");
+    }
+
     public async ValueTask DisposeAsync()
     {
         try

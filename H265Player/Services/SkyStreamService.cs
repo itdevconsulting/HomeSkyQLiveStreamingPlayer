@@ -48,6 +48,7 @@ public sealed class SkyStreamService : IDisposable
 
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _commandLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _sequenceCts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> _nextKeyAt = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<Task<SkyStreamClient>>> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _cachePath;
@@ -127,8 +128,18 @@ public sealed class SkyStreamService : IDisposable
         };
 
         var hostKey = host.Trim();
+        var sequence = PreemptSequence(hostKey, cancellationToken);
         var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            await gate.WaitAsync(sequence.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            CompleteSequence(hostKey, sequence);
+            return new SkyQCommandResult(true, host, command, "Superseded by a newer command.", logs);
+        }
+
         try
         {
             var gap = command.Length == 1 && char.IsDigit(command[0]) ? DigitKeyGap : OtherKeyGap;
@@ -138,15 +149,20 @@ public sealed class SkyStreamService : IDisposable
                 if (wait > 0)
                 {
                     logs.Add($"Spacing {wait}ms before {command}.");
-                    await Task.Delay((int)Math.Min(wait, (long)gap.TotalMilliseconds), cancellationToken);
+                    await Task.Delay((int)Math.Min(wait, (long)gap.TotalMilliseconds), sequence.Token);
                 }
             }
 
-            var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
+            var response = await SendKeyWithRetryAsync(hostKey, key, logs, sequence.Token);
             _nextKeyAt[hostKey] = Environment.TickCount64 + (long)gap.TotalMilliseconds;
             var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
             logs.Add(ok ? "Key accepted." : $"Box response: {response}");
             return new SkyQCommandResult(ok, host, command, ok ? "Command sent." : "Sky Stream rejected the key.", logs);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logs.Add("Superseded by a newer command.");
+            return new SkyQCommandResult(true, host, command, "Superseded by a newer command.", logs);
         }
         catch (Exception ex)
         {
@@ -156,6 +172,7 @@ public sealed class SkyStreamService : IDisposable
         finally
         {
             gate.Release();
+            CompleteSequence(hostKey, sequence);
         }
     }
 
@@ -176,31 +193,49 @@ public sealed class SkyStreamService : IDisposable
         {
             $"Target={host}:{SkyStreamCredentials.Port}",
             $"Live TV channel={channelNumber}",
-            "Sequence=Home, Down, Down, Select, Select, Down, pause, digits, Select, Select"
+            "Calling Guide, then pause, channel number, OK, OK"
         };
 
+        var guide = await OpenGuideAsync(host, cancellationToken);
+        logs.AddRange(guide.Logs);
+        logs.Add($"Guide: {guide.Message}");
+        if (string.Equals(guide.Message, "Superseded by a newer command.", StringComparison.Ordinal))
+        {
+            return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
+        }
+
         var hostKey = host.Trim();
+        var sequence = PreemptSequence(hostKey, cancellationToken);
         var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
         try
         {
-            if (!await SendGuidePathAsync(hostKey, logs, cancellationToken))
-            {
-                logs.Add("Guide path had a key problem; still entering the channel number.");
-            }
+            await gate.WaitAsync(sequence.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            CompleteSequence(hostKey, sequence);
+            return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
+        }
 
-            logs.Add("Waiting for guide before entering the channel number.");
-            await Task.Delay(1500, cancellationToken);
+        try
+        {
+            logs.Add("Guide finished. Waiting before the channel number.");
+            await Task.Delay(1500, sequence.Token);
 
             foreach (var digit in channelNumber.ToString())
             {
-                await SendKeyedAsync(hostKey, digit.ToString(), 400, logs, cancellationToken);
+                await SendKeyedAsync(hostKey, digit.ToString(), 400, logs, sequence.Token);
             }
 
-            await SendKeyedAsync(hostKey, "select", 500, logs, cancellationToken);
-            await SendKeyedAsync(hostKey, "select", 200, logs, cancellationToken);
+            await SendKeyedAsync(hostKey, "select", 500, logs, sequence.Token);
+            await SendKeyedAsync(hostKey, "select", 200, logs, sequence.Token);
 
             return new SkyQCommandResult(true, host, "livetv", $"Tuning live TV {channelNumber}.", logs);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logs.Add("Superseded by a newer command.");
+            return new SkyQCommandResult(true, host, "livetv", "Superseded by a newer command.", logs);
         }
         catch (Exception ex)
         {
@@ -210,6 +245,7 @@ public sealed class SkyStreamService : IDisposable
         finally
         {
             gate.Release();
+            CompleteSequence(hostKey, sequence);
         }
     }
 
@@ -224,20 +260,31 @@ public sealed class SkyStreamService : IDisposable
         var logs = new List<string>
         {
             $"Target={host}:{SkyStreamCredentials.Port}",
-            "Sequence=Home, Down, Down, Select, Select, Down"
+            "Sequence=Home, Down, Down, Select, Select, Select"
         };
 
         var hostKey = host.Trim();
+        var sequence = PreemptSequence(hostKey, cancellationToken);
         var gate = _commandLocks.GetOrAdd(hostKey, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
         try
         {
-            if (!await SendGuidePathAsync(hostKey, logs, cancellationToken))
-            {
-                return new SkyQCommandResult(false, host, "tvguide", "Guide navigation was rejected.", logs);
-            }
+            await gate.WaitAsync(sequence.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            CompleteSequence(hostKey, sequence);
+            return new SkyQCommandResult(true, host, "tvguide", "Superseded by a newer command.", logs);
+        }
 
+        try
+        {
+            await SendGuidePathAsync(hostKey, logs, sequence.Token);
             return new SkyQCommandResult(true, host, "tvguide", "Opening guide.", logs);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logs.Add("Superseded by a newer command.");
+            return new SkyQCommandResult(true, host, "tvguide", "Superseded by a newer command.", logs);
         }
         catch (Exception ex)
         {
@@ -247,18 +294,21 @@ public sealed class SkyStreamService : IDisposable
         finally
         {
             gate.Release();
+            CompleteSequence(hostKey, sequence);
         }
     }
 
-    private async Task<bool> SendGuidePathAsync(string host, List<string> logs, CancellationToken cancellationToken) =>
-        await SendKeyedAsync(host, "home", 2600, logs, cancellationToken) &&
-        await SendKeyedAsync(host, "down", 280, logs, cancellationToken) &&
-        await SendKeyedAsync(host, "down", 800, logs, cancellationToken) &&
-        await SendKeyedAsync(host, "select", 1400, logs, cancellationToken) &&
-        await SendKeyedAsync(host, "select", 1100, logs, cancellationToken) &&
-        await SendKeyedAsync(host, "down", 500, logs, cancellationToken);
+    private async Task SendGuidePathAsync(string host, List<string> logs, CancellationToken cancellationToken)
+    {
+        await SendKeyedAsync(host, "home", 2600, logs, cancellationToken);
+        await SendKeyedAsync(host, "down", 280, logs, cancellationToken);
+        await SendKeyedAsync(host, "down", 800, logs, cancellationToken);
+        await SendKeyedAsync(host, "select", 1400, logs, cancellationToken);
+        await SendKeyedAsync(host, "select", 1100, logs, cancellationToken);
+        await SendKeyedAsync(host, "select", 500, logs, cancellationToken);
+    }
 
-    private async Task<bool> SendKeyedAsync(
+    private async Task SendKeyedAsync(
         string host,
         string command,
         int settleMs,
@@ -268,29 +318,52 @@ public sealed class SkyStreamService : IDisposable
         if (!Commands.TryGetValue(command, out var key))
         {
             logs.Add($"Unknown command '{command}'.");
-            return false;
+            return;
         }
 
         logs.Add($"Key={key}");
-        try
-        {
-            var client = await GetClientAsync(host, logs, cancellationToken);
-            var response = await client.SendKeyAsync(key, cancellationToken);
-            var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
-            logs.Add(ok ? "Key accepted." : $"Box response: {response}");
-        }
-        catch (TimeoutException ex)
-        {
-            logs.Add($"No ack for {key}; continuing. {ex.Message}");
-        }
-
+        var client = await GetClientAsync(host, logs, cancellationToken);
+        await client.SendKeyNoWaitAsync(key, cancellationToken);
+        logs.Add("Key sent.");
         _nextKeyAt[host] = Environment.TickCount64 + settleMs;
         if (settleMs > 0)
         {
             await Task.Delay(settleMs, cancellationToken);
         }
+    }
 
-        return true;
+    private CancellationTokenSource PreemptSequence(string host, CancellationToken outer)
+    {
+        var next = CancellationTokenSource.CreateLinkedTokenSource(outer);
+        if (_sequenceCts.TryGetValue(host, out var previous) && !ReferenceEquals(previous, next))
+        {
+            try
+            {
+                previous.Cancel();
+            }
+            catch
+            {
+            }
+        }
+
+        _sequenceCts[host] = next;
+        return next;
+    }
+
+    private void CompleteSequence(string host, CancellationTokenSource owned)
+    {
+        if (_sequenceCts.TryGetValue(host, out var current) && ReferenceEquals(current, owned))
+        {
+            _sequenceCts.TryRemove(host, out _);
+        }
+
+        try
+        {
+            owned.Dispose();
+        }
+        catch
+        {
+        }
     }
 
     public async Task WarmAsync(string host, CancellationToken cancellationToken)
@@ -839,6 +912,18 @@ public sealed class SkyStreamService : IDisposable
         foreach (var host in _sessions.Keys.ToArray())
         {
             _ = DropSessionAsync(host);
+        }
+
+        foreach (var cts in _sequenceCts.Values)
+        {
+            try
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+            catch
+            {
+            }
         }
 
         _scanLock.Dispose();

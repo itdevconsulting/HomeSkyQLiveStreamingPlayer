@@ -129,7 +129,7 @@
     <p class="lede">Send Home runs the real Sky Remote pair, bind, and Home key against this IP (or the selected box if the field is empty). If nmap shows 8091 filtered, wake the puck on this LAN until the port is open.</p>
 
     <SkyStreamLiveTvPicker Disabled="@(_tuningLiveTv || SelectedDevice is null)" OnChannel="TuneLiveChannelAsync" />
-    <p class="lede">Live TV uses the same Home path as Guide, pauses, then types the Sky Stream / Glass UK channel number and confirms with OK twice.</p>
+    <p class="lede">Live TV presses Guide, waits, types the channel number, then OK, OK.</p>
 
     <div class="control-grid skyq-remote-grid">
         @foreach (var command in PrimaryCommands)
@@ -175,8 +175,8 @@
         "Send Home runs the real Sky Remote pair/bind/Home sequence. nmap 8091/tcp filtered means the puck is still not offering Sky Remote — wake it on the LAN until that port is open.",
         "The first key press opens an mTLS WebSocket, pairs automatically, then binds. Later keys reuse that session.",
         "If bind fails repeatedly, reboot the Sky Stream box. The box can lock out failed authentication attempts.",
-        "Live TV is Guide (Home, Down, Down, OK, OK, Down), a short pause, then the channel number and OK, OK. Numbers follow the Sky Stream / Glass UK EPG, not Sky Q satellite.",
-        "Guide walks Home, Down, Down, OK, OK, Down instead of sending the Sky Q guide key, which Stream does not use."
+        "Live TV presses the same Guide action as the Guide button, waits, types the channel number, then OK, OK.",
+        "Guide walks Home, Down, Down, OK, OK, OK. Pressing Guide again cancels whatever the remote is already sending."
     ];
 
     private SkyStreamScanResponse? ScanResult { get; set; }
