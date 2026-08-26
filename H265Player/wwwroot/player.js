@@ -997,11 +997,6 @@ window.h265App = {
                 if (target.closest("input, textarea, select, [contenteditable='true']")) {
                     return;
                 }
-
-                if ((event.key === "Enter" || event.key === " " || event.key === "Spacebar") &&
-                    target.closest("button, a, [role='button']")) {
-                    return;
-                }
             }
 
             const mapped = this._isPageRemoteKey(event.key);
@@ -1010,6 +1005,8 @@ window.h265App = {
             }
 
             event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
             this._pageRemoteKeysRef?.invokeMethodAsync("HandlePageKey", event.key, !!event.shiftKey);
         };
         window.addEventListener("keydown", this._pageRemoteKeysHandler, true);

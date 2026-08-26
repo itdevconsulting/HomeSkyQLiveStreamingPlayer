@@ -20,8 +20,6 @@
 
     <ScanNetworkEditor AutoSave="true" Saved="OnScanNetworksSaved" />
 
-    <RemoteKeyCapture Enabled="SelectedDevice is not null" OnCommand="SendCommandAsync" />
-
     <div class="status-grid">
         <div>
             <span class="label">App Base URL</span>
@@ -168,7 +166,6 @@
         "Keep the puck on its UK-egress gateway. Install this service on that gateway box so TCP 8091 is local. Tailscale is only for the web UI.",
         "Number keys are queued with a short gap so rapid channel entry is not dropped. Scan and Wake still lock the page.",
         "The first key after connecting used to fire before the box was ready. The session now settles after bind, and selecting a box pre-opens it.",
-        "Keyboard arrows, numbers, Enter, Esc, Space, H, and G work on this page without focusing the on-screen remote, unless you are typing in a field.",
         "Scan Private Network looks for mDNS `_rdk-rics._tcp` and open TCP port 8091 on connected private NICs.",
         "Select a discovered box before sending any remote command.",
         "Wake puck is optional. If you already woke the box another way, just send keys.",

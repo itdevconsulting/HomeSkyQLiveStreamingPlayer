@@ -12,10 +12,9 @@
     }
 </button>
 
-<RemoteKeyCapture OnCommand="OnCommand" />
-
 @if (_isOpen)
 {
+    <RemoteKeyCapture OnCommand="OnCommand" />
     <div id="@PanelId" class="mini-remote" tabindex="0">
         <div class="mini-remote-handle">
             <div id="@HandleId" class="mini-remote-handle-drag">
