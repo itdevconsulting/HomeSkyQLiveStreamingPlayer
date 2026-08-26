@@ -15,7 +15,8 @@ public sealed class SkyStreamService : IDisposable
         ["tvguide"] = "AccessMenu",
         ["search"] = "Search",
         ["dismiss"] = "Dismiss",
-        ["backup"] = "Backspace",
+        ["backup"] = "Dismiss",
+        ["back"] = "Dismiss",
         ["up"] = "ArrowUp",
         ["down"] = "ArrowDown",
         ["left"] = "ArrowLeft",
@@ -155,14 +156,12 @@ public sealed class SkyStreamService : IDisposable
                 await Task.Delay(FirstDigitGap, cancellationToken);
             }
 
-            var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
-            logs.Add("Key sent. Waiting before the next command.");
+            await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
+            logs.Add("Key sent. Not waiting for a box reply.");
             await Task.Delay(gap, cancellationToken);
             _nextKeyAt[hostKey] = Environment.TickCount64;
             _lastWasDigit[hostKey] = isDigit;
-            var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
-            logs.Add(ok ? "Key sent." : $"Box response: {response}");
-            return new SkyQCommandResult(ok, host, command, ok ? "Command sent." : "Sky Stream rejected the key.", logs);
+            return new SkyQCommandResult(true, host, command, "Command sent.", logs);
         }
         catch (Exception ex)
         {
@@ -394,7 +393,7 @@ public sealed class SkyStreamService : IDisposable
         }
     }
 
-    private async Task<System.Text.Json.JsonElement> SendKeyWithRetryAsync(
+    private async Task SendKeyWithRetryAsync(
         string host,
         string key,
         List<string> logs,
@@ -403,7 +402,7 @@ public sealed class SkyStreamService : IDisposable
         try
         {
             var client = await GetClientAsync(host, logs, cancellationToken);
-            return await client.SendKeyAsync(key, cancellationToken);
+            await client.SendKeyAsync(key, cancellationToken);
         }
         catch (Exception first)
         {
@@ -415,7 +414,7 @@ public sealed class SkyStreamService : IDisposable
 
             await DropSessionAsync(host);
             var client = await GetClientAsync(host, logs, cancellationToken);
-            return await client.SendKeyAsync(key, cancellationToken);
+            await client.SendKeyAsync(key, cancellationToken);
         }
     }
 
@@ -455,11 +454,19 @@ public sealed class SkyStreamService : IDisposable
     {
         logs.Add("Opening mTLS WebSocket to /iptarget.");
         var client = new SkyStreamClient(host, log: logs.Add);
-        await client.ConnectAndBindAsync(cancellationToken);
-        logs.Add(string.IsNullOrWhiteSpace(client.DeviceName)
-            ? "Paired and bound."
-            : $"Paired and bound to {client.DeviceName}.");
-        return client;
+        try
+        {
+            await client.ConnectAndBindAsync(cancellationToken);
+            logs.Add(string.IsNullOrWhiteSpace(client.DeviceName)
+                ? "Paired and bound."
+                : $"Paired and bound to {client.DeviceName}.");
+            return client;
+        }
+        catch
+        {
+            await client.DisposeAsync();
+            throw;
+        }
     }
 
     private static bool IsTcpUnreachable(Exception ex)

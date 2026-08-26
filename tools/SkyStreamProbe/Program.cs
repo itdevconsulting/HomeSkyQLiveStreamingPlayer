@@ -10,8 +10,8 @@ await using var client = new SkyStreamClient(host, log: Log);
 try
 {
     await client.ConnectAndBindAsync(CancellationToken.None);
-    var response = await client.SendKeyAsync(key, CancellationToken.None);
-    Log($"Key response: {response}");
+    await client.SendKeyAsync(key, CancellationToken.None);
+    Log("Key sent without waiting for a box reply.");
     return 0;
 }
 catch (Exception ex)
