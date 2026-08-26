@@ -115,10 +115,7 @@ public sealed class SkyStreamService : IDisposable
     }
 
     public Task<SkyQCommandResult> SendCommandAsync(string host, string command, CancellationToken cancellationToken) =>
-        Task.FromResult(QueueCommand(host, command, replaceMacro: true));
-
-    public Task<SkyQCommandResult> OpenGuideAsync(string host, CancellationToken cancellationToken) =>
-        Task.FromResult(QueueGuide(host));
+        Task.FromResult(SendCommand(host, command));
 
     public Task<SkyQCommandResult> TuneLiveChannelAsync(string host, int channelNumber, CancellationToken cancellationToken)
     {
@@ -127,48 +124,35 @@ public sealed class SkyStreamService : IDisposable
             return Task.FromResult(new SkyQCommandResult(false, host, "livetv", $"Invalid channel number {channelNumber}.", []));
         }
 
-        var guide = QueueGuide(host);
+        var guide = SendCommand(host, "tvguide");
         if (!guide.Success)
         {
             return Task.FromResult(new SkyQCommandResult(false, host, "livetv", guide.Message, guide.Logs));
         }
 
-        QueueCommand(host, "", replaceMacro: false, settleMs: 2000);
+        SendCommand(host, "", settleMs: 2000, continueMacro: true);
         var firstDigit = true;
         foreach (var digit in channelNumber.ToString())
         {
-            QueueCommand(host, digit.ToString(), replaceMacro: false, settleMs: (int)(firstDigit ? FirstDigitGap : DigitKeyGap).TotalMilliseconds);
+            SendCommand(
+                host,
+                digit.ToString(),
+                settleMs: (int)(firstDigit ? FirstDigitGap : DigitKeyGap).TotalMilliseconds,
+                continueMacro: true);
             firstDigit = false;
         }
 
-        QueueCommand(host, "select", replaceMacro: false);
-        QueueCommand(host, "select", replaceMacro: false);
+        SendCommand(host, "select", continueMacro: true);
+        SendCommand(host, "select", continueMacro: true);
         return Task.FromResult(new SkyQCommandResult(
             true,
             host,
             "livetv",
             $"Tuning live TV {channelNumber}.",
-            [$"Target={host}:{SkyStreamCredentials.Port}", $"Live TV channel={channelNumber}", "Queued Guide, then channel number, OK, OK."]));
+            [$"Target={host}:{SkyStreamCredentials.Port}", $"Live TV channel={channelNumber}", "Guide, then channel number, OK, OK."]));
     }
 
-    private SkyQCommandResult QueueGuide(string host)
-    {
-        SkyQCommandResult? last = null;
-        var first = true;
-        foreach (var stroke in GuideStrokes)
-        {
-            last = QueueCommand(host, stroke.Command, replaceMacro: first, settleMs: stroke.SettleMs);
-            first = false;
-            if (!last.Success)
-            {
-                return last;
-            }
-        }
-
-        return last ?? new SkyQCommandResult(false, host, "tvguide", "Guide sequence is empty.", []);
-    }
-
-    private SkyQCommandResult QueueCommand(string host, string command, bool replaceMacro, int? settleMs = null)
+    private SkyQCommandResult SendCommand(string host, string command, int? settleMs = null, bool continueMacro = false)
     {
         if (!TryHost(host, out _))
         {
@@ -177,13 +161,25 @@ public sealed class SkyStreamService : IDisposable
 
         if (string.Equals(command, "tvguide", StringComparison.OrdinalIgnoreCase))
         {
-            return QueueGuide(host);
+            SkyQCommandResult? last = null;
+            var skipCancel = continueMacro;
+            foreach (var stroke in GuideStrokes)
+            {
+                last = SendCommand(host, stroke.Command, stroke.SettleMs, continueMacro: skipCancel);
+                skipCancel = true;
+                if (!last.Success)
+                {
+                    return last;
+                }
+            }
+
+            return last ?? new SkyQCommandResult(false, host, "tvguide", "Guide sequence is empty.", []);
         }
 
         var hostKey = host.Trim();
         if (string.IsNullOrEmpty(command))
         {
-            GetClient(hostKey).Enqueue(null, settleMs ?? 0, replaceMacro);
+            GetClient(hostKey).Enqueue(null, settleMs ?? 0, replaceMacro: !continueMacro);
             return new SkyQCommandResult(true, host, "wait", "Queued.", []);
         }
 
@@ -197,7 +193,7 @@ public sealed class SkyStreamService : IDisposable
         var settle = settleMs ?? (int)(isDigit
             ? (continuingDigits ? DigitKeyGap : FirstDigitGap)
             : OtherKeyGap).TotalMilliseconds;
-        GetClient(hostKey).Enqueue(key, settle, replaceMacro);
+        GetClient(hostKey).Enqueue(key, settle, replaceMacro: !continueMacro);
         _lastWasDigit[hostKey] = isDigit;
         return new SkyQCommandResult(
             true,

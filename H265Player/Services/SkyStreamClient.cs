@@ -51,8 +51,6 @@ internal sealed class SkyStreamClient : IAsyncDisposable
         _run ??= Task.Run(() => RunAsync(_runCts.Token));
     }
 
-    public void Warm() => Enqueue(protocolKey: null, settleMs: 0, replaceMacro: false);
-
     public void Enqueue(string? protocolKey, int settleMs, bool replaceMacro)
     {
         Start();
