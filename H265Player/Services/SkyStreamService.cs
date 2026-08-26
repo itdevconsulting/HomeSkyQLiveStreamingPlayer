@@ -171,7 +171,7 @@ public sealed class SkyStreamService : IDisposable
         {
             $"Target={host}:{SkyStreamCredentials.Port}",
             $"Live TV channel={channelNumber}",
-            "Sequence=Home, Down, Down, Select, Down, Select, Down, digits, Select"
+            "Sequence=Home, Down, Down, Select, Down, Select, Down, digits, Select, Select"
         };
 
         var hostKey = host.Trim();
@@ -219,7 +219,8 @@ public sealed class SkyStreamService : IDisposable
                 }
             }
 
-            if (!await SendAsync("select", 200))
+            if (!await SendAsync("select", 400) ||
+                !await SendAsync("select", 200))
             {
                 return new SkyQCommandResult(false, host, "livetv", $"Live TV failed to confirm {channelNumber}.", logs);
             }
