@@ -176,7 +176,7 @@ public sealed class SkyStreamService : IDisposable
         {
             $"Target={host}:{SkyStreamCredentials.Port}",
             $"Live TV channel={channelNumber}",
-            "Sequence=Home, Down, Down, Select, Down, Select, Down, digits, Select, Select"
+            "Sequence=Home, Down, Down, Select, Select, Down, pause, digits, Select, Select"
         };
 
         var hostKey = host.Trim();
@@ -184,48 +184,24 @@ public sealed class SkyStreamService : IDisposable
         await gate.WaitAsync(cancellationToken);
         try
         {
-            async Task<bool> SendAsync(string command, int settleMs)
-            {
-                if (!Commands.TryGetValue(command, out var key))
-                {
-                    logs.Add($"Unknown command '{command}'.");
-                    return false;
-                }
-
-                logs.Add($"Key={key}");
-                var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
-                var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
-                logs.Add(ok ? "Key accepted." : $"Box response: {response}");
-                _nextKeyAt[hostKey] = Environment.TickCount64 + settleMs;
-                if (settleMs > 0)
-                {
-                    await Task.Delay(settleMs, cancellationToken);
-                }
-
-                return ok;
-            }
-
-            if (!await SendAsync("home", 2600) ||
-                !await SendAsync("down", 280) ||
-                !await SendAsync("down", 800) ||
-                !await SendAsync("select", 1400) ||
-                !await SendAsync("down", 350) ||
-                !await SendAsync("select", 1100) ||
-                !await SendAsync("down", 500))
+            if (!await SendGuidePathAsync(hostKey, logs, cancellationToken))
             {
                 return new SkyQCommandResult(false, host, "livetv", "Live TV navigation was rejected before the channel number.", logs);
             }
 
+            logs.Add("Waiting for guide before entering the channel number.");
+            await Task.Delay(900, cancellationToken);
+
             foreach (var digit in channelNumber.ToString())
             {
-                if (!await SendAsync(digit.ToString(), 350))
+                if (!await SendKeyedAsync(hostKey, digit.ToString(), 350, logs, cancellationToken))
                 {
                     return new SkyQCommandResult(false, host, "livetv", $"Live TV failed while entering {channelNumber}.", logs);
                 }
             }
 
-            if (!await SendAsync("select", 400) ||
-                !await SendAsync("select", 200))
+            if (!await SendKeyedAsync(hostKey, "select", 400, logs, cancellationToken) ||
+                !await SendKeyedAsync(hostKey, "select", 200, logs, cancellationToken))
             {
                 return new SkyQCommandResult(false, host, "livetv", $"Live TV failed to confirm {channelNumber}.", logs);
             }
@@ -262,33 +238,7 @@ public sealed class SkyStreamService : IDisposable
         await gate.WaitAsync(cancellationToken);
         try
         {
-            async Task<bool> SendAsync(string command, int settleMs)
-            {
-                if (!Commands.TryGetValue(command, out var key))
-                {
-                    logs.Add($"Unknown command '{command}'.");
-                    return false;
-                }
-
-                logs.Add($"Key={key}");
-                var response = await SendKeyWithRetryAsync(hostKey, key, logs, cancellationToken);
-                var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
-                logs.Add(ok ? "Key accepted." : $"Box response: {response}");
-                _nextKeyAt[hostKey] = Environment.TickCount64 + settleMs;
-                if (settleMs > 0)
-                {
-                    await Task.Delay(settleMs, cancellationToken);
-                }
-
-                return ok;
-            }
-
-            if (!await SendAsync("home", 2600) ||
-                !await SendAsync("down", 280) ||
-                !await SendAsync("down", 800) ||
-                !await SendAsync("select", 1400) ||
-                !await SendAsync("select", 1100) ||
-                !await SendAsync("down", 500))
+            if (!await SendGuidePathAsync(hostKey, logs, cancellationToken))
             {
                 return new SkyQCommandResult(false, host, "tvguide", "Guide navigation was rejected.", logs);
             }
@@ -304,6 +254,40 @@ public sealed class SkyStreamService : IDisposable
         {
             gate.Release();
         }
+    }
+
+    private async Task<bool> SendGuidePathAsync(string host, List<string> logs, CancellationToken cancellationToken) =>
+        await SendKeyedAsync(host, "home", 2600, logs, cancellationToken) &&
+        await SendKeyedAsync(host, "down", 280, logs, cancellationToken) &&
+        await SendKeyedAsync(host, "down", 800, logs, cancellationToken) &&
+        await SendKeyedAsync(host, "select", 1400, logs, cancellationToken) &&
+        await SendKeyedAsync(host, "select", 1100, logs, cancellationToken) &&
+        await SendKeyedAsync(host, "down", 500, logs, cancellationToken);
+
+    private async Task<bool> SendKeyedAsync(
+        string host,
+        string command,
+        int settleMs,
+        List<string> logs,
+        CancellationToken cancellationToken)
+    {
+        if (!Commands.TryGetValue(command, out var key))
+        {
+            logs.Add($"Unknown command '{command}'.");
+            return false;
+        }
+
+        logs.Add($"Key={key}");
+        var response = await SendKeyWithRetryAsync(host, key, logs, cancellationToken);
+        var ok = response.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.True;
+        logs.Add(ok ? "Key accepted." : $"Box response: {response}");
+        _nextKeyAt[host] = Environment.TickCount64 + settleMs;
+        if (settleMs > 0)
+        {
+            await Task.Delay(settleMs, cancellationToken);
+        }
+
+        return ok;
     }
 
     public async Task WarmAsync(string host, CancellationToken cancellationToken)
