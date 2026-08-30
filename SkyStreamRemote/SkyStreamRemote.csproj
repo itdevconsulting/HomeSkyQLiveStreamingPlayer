@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoWarn>$(NoWarn);CS2008</NoWarn>
+    <Description>Sky Stream ESPHome IR remote web assets for HomeSkyQLiveStreamingPlayer.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="sky_remote.js" />
+    <Content Include="sky_remote.css" />
+    <Content Include="esphome\sky-stream-remote.yaml.example" />
+    <None Include="README.md" />
+  </ItemGroup>
+
+</Project>

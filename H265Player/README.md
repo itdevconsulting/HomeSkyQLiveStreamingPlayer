@@ -171,6 +171,7 @@ This project builds on, or was directly informed by, the following upstream proj
 - `sky_stream_remote`
   - The Sky Stream remote uses the reverse-engineered Sky Remote LAN protocol documented here (mDNS `_rdk-rics._tcp`, mTLS WebSocket on port 8091). Run the service on the UK-egress gateway box beside the puck; Tailscale subnet routing is not a substitute for TCP 8091.
   - Upstream: https://github.com/jatatech/sky_stream_remote
+  - For IR wake/control from Home Assistant, see the `SkyStreamRemote` ESP32 assets at the repo root. ESPHome loads `sky_remote.js` and `sky_remote.css` from GitHub.
 
 ## Notes
 

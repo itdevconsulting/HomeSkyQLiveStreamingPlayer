@@ -113,6 +113,7 @@ Full Docker and Home Assistant notes are in [DOCKER.md](DOCKER.md).
 - wakes sleeping Sky Stream pucks with a magic packet before opening the Sky Remote mTLS session
 - sends Sky Q remote-control commands over the LAN control socket
 - sends Sky Stream remote-control commands over the Sky Remote mTLS WebSocket protocol from a host on the puck’s LAN, typically the UK-egress gateway box (Tailscale is for the browser UI, not for TCP 8091)
+- includes an ESP32 / ESPHome IR remote (`SkyStreamRemote`) whose web JS/CSS are loaded from this GitHub repo, for waking and controlling a puck when the HTTP Sky Remote path is not enough
 - plays browser-friendly direct streams such as MPEG-TS or HLS
 - supports FFmpeg-managed ingest/transcode for awkward HTTP or RTSP sources
 - stores presets that bind a stream source to a specific Sky Q box
