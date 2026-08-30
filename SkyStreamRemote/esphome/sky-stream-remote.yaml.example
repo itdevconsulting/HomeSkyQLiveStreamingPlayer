@@ -31,9 +31,8 @@ captive_portal:
 # ============================================================
 # CUSTOM STANDALONE WEB REMOTE
 # ============================================================
-# The ESP32 serves the page. A tiny loader then fetches JS/CSS from GitHub
-# on every browser load (cache: no-store). Do not copy JS/CSS onto the device.
-# css_url is empty so ESPHome does not pin a cached stylesheet.
+# The ESP32 serves the page. A tiny loader then fetches sky_remote.js from
+# GitHub on every browser load (cache: no-store). Do not copy JS onto the device.
 #
 # Browse to:
 #   http://sky-stream-ir.local/

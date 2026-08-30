@@ -1,8 +1,9 @@
 (() => {
   "use strict";
 
-  const REPO = "itdevconsulting/HomeSkyQLiveStreamingPlayer";
-  const BASE = `https://raw.githubusercontent.com/${REPO}/main/SkyStreamRemote`;
+  const JS_URL =
+    "https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/SkyStreamRemote/sky_remote.js?t=" +
+    Date.now();
 
   function showError(message) {
     document.body.textContent = "";
@@ -12,26 +13,16 @@
     document.body.appendChild(pre);
   }
 
-  async function loadAsset(name, mime) {
-    const url = `${BASE}/${name}?t=${Date.now()}`;
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`${name}: HTTP ${response.status} from GitHub`);
-    }
-
-    const text = await response.text();
-    return URL.createObjectURL(new Blob([text], { type: mime }));
-  }
-
   async function boot() {
     try {
-      const cssUrl = await loadAsset("sky_remote.css", "text/css");
-      const jsUrl = await loadAsset("sky_remote.js", "text/javascript");
+      const response = await fetch(JS_URL, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`sky_remote.js: HTTP ${response.status} from GitHub`);
+      }
 
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = cssUrl;
-      document.head.appendChild(link);
+      const jsUrl = URL.createObjectURL(
+        new Blob([await response.text()], { type: "text/javascript" })
+      );
 
       await new Promise((resolve, reject) => {
         const script = document.createElement("script");

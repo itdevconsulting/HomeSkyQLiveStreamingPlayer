@@ -12,7 +12,6 @@
 
   <ItemGroup>
     <Content Include="sky_remote.js" />
-    <Content Include="sky_remote.css" />
     <Content Include="sky_remote.loader.js" />
     <Content Include="esphome\sky-stream-remote.yaml.example" />
     <None Include="README.md" />
