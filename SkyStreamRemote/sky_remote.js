@@ -2,13 +2,14 @@
   "use strict";
 
   const COMMAND_DELAY_MS = 250;
+  const TV_GUIDE_LAST_DOWN_DELAY_MS = 750;
   const TV_GUIDE_STEPS = [
-    "sky_stream_home",
-    "sky_stream_down",
-    "sky_stream_down",
-    "sky_stream_ok",
-    "sky_stream_back",
-    "sky_stream_down"
+    { id: "sky_stream_home", waitAfterMs: COMMAND_DELAY_MS },
+    { id: "sky_stream_down", waitAfterMs: COMMAND_DELAY_MS },
+    { id: "sky_stream_down", waitAfterMs: COMMAND_DELAY_MS },
+    { id: "sky_stream_ok", waitAfterMs: COMMAND_DELAY_MS },
+    { id: "sky_stream_back", waitAfterMs: TV_GUIDE_LAST_DOWN_DELAY_MS },
+    { id: "sky_stream_down", waitAfterMs: 0 }
   ];
 
   let sequenceBusy = false;
@@ -91,9 +92,12 @@
     try {
       for (const step of steps) {
         const id = typeof step === "string" ? step : step.id;
+        const waitAfterMs = typeof step === "string" ? COMMAND_DELAY_MS : step.waitAfterMs;
         setStatus(`${name}: ${id.replace("sky_stream_", "").replaceAll("_", " ")}`, "", 0);
         await postCommand(id);
-        await delay(COMMAND_DELAY_MS);
+        if (waitAfterMs > 0) {
+          await delay(waitAfterMs);
+        }
       }
 
       setStatus(name, "ok");
