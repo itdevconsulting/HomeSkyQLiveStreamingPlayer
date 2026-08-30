@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const COMMAND_DELAY_MS = 500;
+  const COMMAND_DELAY_MS = 2000;
   const TV_GUIDE_STEPS = [
     "sky_stream_home",
     "sky_stream_down",
@@ -114,7 +114,7 @@
             return;
           }
 
-          setStatus(`wait 500 ms before ${String(steps[index]).replace("sky_stream_", "").replaceAll("_", " ")}`, "", 0);
+          setStatus(`wait ${COMMAND_DELAY_MS} ms before ${String(steps[index]).replace("sky_stream_", "").replaceAll("_", " ")}`, "", 0);
           window.setTimeout(sendNext, COMMAND_DELAY_MS);
         })
         .catch(error => {
@@ -217,7 +217,7 @@
           </div>
 
           <div id="sky-status" class="status">Ready</div>
-          <div class="footer">500 ms between TV Guide keys</div>
+          <div class="footer">2000 ms between TV Guide keys</div>
         </section>
       </main>
     `;
