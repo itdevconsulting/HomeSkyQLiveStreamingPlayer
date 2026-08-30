@@ -6,14 +6,18 @@ The HTTP Sky Stream remote in this repo talks to TCP 8091. That path cannot wake
 
 ## Files
 
-- `sky_remote.js` — remote UI, styles, key clicks, keyboard, and the TV Guide macro.
-- `sky_remote.loader.js` — fetched by ESPHome; pulls `sky_remote.js` from GitHub on every page load.
+- `sky_remote.js` — remote UI, styles, key clicks, keyboard, and TV Guide.
+- `sky_remote.loader.js` — what ESPHome’s `js_url` loads; it then fetches `sky_remote.js` from GitHub.
 - `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant.
 - `SkyStreamRemote.csproj` — Rider project so these assets sit in the same solution as the player.
 
 ## GitHub URLs for ESPHome
 
-The firmware only stores a tiny loader URL. On every visit to `http://sky-stream-ir.local/`, that loader fetches `sky_remote.js` from GitHub `main` with `cache: no-store`. A refresh picks up a JS push without flashing the ESP32 again.
+Do not put this in `js_url`:
+
+`https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/SkyStreamRemote/sky_remote.js`
+
+GitHub serves that as `text/plain` with `nosniff`. The browser will not run it as a script. That is the file the **loader** fetches with `fetch()` (plain text is fine there), then injects as JavaScript.
 
 ```yaml
 web_server:
@@ -22,9 +26,6 @@ web_server:
   css_url: ""
   js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.loader.js"
 ```
-
-Flash once after this YAML change. After that, push JS to `main` and refresh the ESP32 page.
-
 ## Keyboard
 
 - Arrow keys: navigation
@@ -44,5 +45,3 @@ The ESP32 fires the whole TV Guide burst on one HTTP press. Browser timers canno
 You must copy `esphome/sky-stream-remote.yaml.example` into Home Assistant and flash the ESP32 once.
 
 `Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`
-
-It does not use the ESP32 `sky_stream_tv_guide` macro.
