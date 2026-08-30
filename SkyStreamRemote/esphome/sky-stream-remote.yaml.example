@@ -272,3 +272,21 @@ button:
     on_press:
       - remote_transmitter.transmit_pronto:
           data: "0000 0072 0000 001F 0060 0021 0010 0011 0010 0011 0010 0021 0010 0021 0020 0011 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0020 0021 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0020 0021 0020 0011 0010 0021 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0010 0011 0010 1071"
+
+  # Runs on the ESP32 so IR gaps are 250 ms even if HTTP returns early.
+  - platform: template
+    name: "sky_stream_tv_guide"
+    id: sky_stream_tv_guide
+    icon: mdi:television-guide
+    on_press:
+      - button.press: sky_stream_home
+      - delay: 250ms
+      - button.press: sky_stream_down
+      - delay: 250ms
+      - button.press: sky_stream_down
+      - delay: 250ms
+      - button.press: sky_stream_ok
+      - delay: 250ms
+      - button.press: sky_stream_back
+      - delay: 250ms
+      - button.press: sky_stream_down

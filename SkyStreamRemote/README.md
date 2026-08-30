@@ -48,7 +48,6 @@ Push to `main`, hard-refresh the ESP32 page (`http://sky-stream-ir.local/`). Fir
 
 The TV Guide button sends, strictly in sequence:
 
-`Home → Down → Down → OK → Back → Down`
+`Home → 250 ms → Down → 250 ms → Down → 250 ms → OK → 250 ms → Back → 250 ms → Down`
 
-Each command waits for the previous HTTP POST to complete, followed by a
-250 ms inter-command delay.
+After you flash the example YAML, that timing runs on the ESP32 so the IR blasts cannot bunch up. Until then, the page walks the same steps in the browser and waits 250 ms after each HTTP press.
