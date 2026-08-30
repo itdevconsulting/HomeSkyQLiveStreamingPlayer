@@ -38,10 +38,8 @@ web_server:
 - `M`: Mute
 - `0`–`9`: send digit immediately
 
-## TV Guide macro
+## TV Guide
 
-The ESP32 fires the whole TV Guide burst on one HTTP press. Browser timers cannot space those IR codes. `sky_stream_tv_guide` now transmits Home, Down, Down, OK, Back, Down on the device with a **2 second** `delay` after each blast. Nested `button.press` does not wait, which is why it raced.
-
-You must copy `esphome/sky-stream-remote.yaml.example` into Home Assistant and flash the ESP32 once.
+TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. The page POSTs Home, waits 2 s, Down, waits 2 s, Down, waits 2 s, OK, waits 2 s, Back, waits 2 s, Down.
 
 `Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`

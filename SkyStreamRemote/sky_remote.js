@@ -74,7 +74,7 @@
     }
   }
 
-  function tvGuide(element = null) {
+  function runSequence(name, steps, element = null) {
     if (sequenceBusy) {
       return;
     }
@@ -84,6 +84,8 @@
       element.classList.add("active");
     }
 
+    let index = 0;
+
     const finish = () => {
       sequenceBusy = false;
       if (element) {
@@ -91,35 +93,42 @@
       }
     };
 
-    setStatus("TV Guide 1/6: home", "", 0);
+    const sendNext = () => {
+      if (index >= steps.length) {
+        setStatus(name, "ok");
+        finish();
+        return;
+      }
 
-    postCommand("sky_stream_tv_guide")
-      .then(() => {
-        let index = 0;
-        const showWaitThenNext = () => {
+      const id = steps[index];
+      const label = id.replace("sky_stream_", "").replaceAll("_", " ");
+      setStatus(`${name} ${index + 1}/${steps.length}: ${label}`, "", 0);
+
+      postCommand(id)
+        .then(() => {
           index += 1;
-          if (index >= TV_GUIDE_STEPS.length) {
-            setStatus("TV Guide", "ok");
+          if (index >= steps.length) {
+            setStatus(name, "ok");
             finish();
             return;
           }
 
-          const nextId = TV_GUIDE_STEPS[index];
-          const nextLabel = nextId.replace("sky_stream_", "").replaceAll("_", " ");
+          const nextLabel = steps[index].replace("sky_stream_", "").replaceAll("_", " ");
           setStatus(`wait ${COMMAND_DELAY_MS} ms before ${nextLabel}`, "", 0);
-          window.setTimeout(() => {
-            setStatus(`TV Guide ${index + 1}/${TV_GUIDE_STEPS.length}: ${nextLabel}`, "", 0);
-            showWaitThenNext();
-          }, COMMAND_DELAY_MS);
-        };
+          window.setTimeout(sendNext, COMMAND_DELAY_MS);
+        })
+        .catch(error => {
+          console.error(`${name} sequence failed:`, error);
+          setStatus(`Failed: ${name}`, "error");
+          finish();
+        });
+    };
 
-        showWaitThenNext();
-      })
-      .catch(error => {
-        console.error("TV Guide sequence failed:", error);
-        setStatus("Failed: TV Guide", "error");
-        finish();
-      });
+    sendNext();
+  }
+
+  function tvGuide(element = null) {
+    runSequence("TV Guide", TV_GUIDE_STEPS, element);
   }
 
   
@@ -208,7 +217,7 @@
           </div>
 
           <div id="sky-status" class="status">Ready</div>
-          <div class="footer">ESP32 waits 2 s between TV Guide keys</div>
+          <div class="footer">JS waits 2 s between TV Guide keys</div>
         </section>
       </main>
     `;
