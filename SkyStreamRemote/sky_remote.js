@@ -3,12 +3,12 @@
 
   const COMMAND_DELAY_MS = 250;
   const TV_GUIDE_STEPS = [
-    { id: "sky_stream_home", waitAfterMs: COMMAND_DELAY_MS },
-    { id: "sky_stream_down", waitAfterMs: COMMAND_DELAY_MS },
-    { id: "sky_stream_down", waitAfterMs: COMMAND_DELAY_MS },
-    { id: "sky_stream_ok", waitAfterMs: COMMAND_DELAY_MS },
-    { id: "sky_stream_back", waitAfterMs: COMMAND_DELAY_MS },
-    { id: "sky_stream_down", waitAfterMs: 0 }
+    "sky_stream_home",
+    "sky_stream_down",
+    "sky_stream_down",
+    "sky_stream_ok",
+    "sky_stream_back",
+    "sky_stream_down"
   ];
 
   let sequenceBusy = false;
@@ -91,12 +91,9 @@
     try {
       for (const step of steps) {
         const id = typeof step === "string" ? step : step.id;
-        const waitAfterMs = typeof step === "string" ? COMMAND_DELAY_MS : step.waitAfterMs;
         setStatus(`${name}: ${id.replace("sky_stream_", "").replaceAll("_", " ")}`, "", 0);
         await postCommand(id);
-        if (waitAfterMs > 0) {
-          await delay(waitAfterMs);
-        }
+        await delay(COMMAND_DELAY_MS);
       }
 
       setStatus(name, "ok");
@@ -111,30 +108,8 @@
     }
   }
 
-  async function tvGuide(element = null) {
-    if (element) {
-      element.classList.add("active");
-    }
-
-    try {
-      sequenceBusy = true;
-      setStatus("TV Guide", "", 0);
-      await postCommand("sky_stream_tv_guide");
-      const heldMs = TV_GUIDE_STEPS.reduce((sum, step) => sum + (step.waitAfterMs || 0), 0);
-      if (heldMs > 0) {
-        await delay(heldMs);
-      }
-      setStatus("TV Guide", "ok");
-    } catch {
-      sequenceBusy = false;
-      await runSequence("TV Guide", TV_GUIDE_STEPS, element);
-    } finally {
-      if (element) {
-        element.classList.remove("active");
-      }
-
-      sequenceBusy = false;
-    }
+  function tvGuide(element = null) {
+    return runSequence("TV Guide", TV_GUIDE_STEPS, element);
   }
 
   

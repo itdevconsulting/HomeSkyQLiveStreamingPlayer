@@ -39,8 +39,8 @@ Flash once after this YAML change. After that, push JS to `main` and refresh the
 
 ## TV Guide macro
 
-The TV Guide button sends, strictly in sequence:
+The TV Guide button sends one HTTP press at a time, and waits 250 ms after each response before the next:
 
 `Home → 250 ms → Down → 250 ms → Down → 250 ms → OK → 250 ms → Back → 250 ms → Down`
 
-After you flash the example YAML, that timing runs on the ESP32 so the IR blasts cannot bunch up. Until then, the page walks the same steps in the browser and waits 250 ms after each HTTP press.
+It does not use the ESP32 `sky_stream_tv_guide` macro.
