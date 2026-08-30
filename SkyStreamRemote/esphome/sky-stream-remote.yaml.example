@@ -33,7 +33,7 @@ captive_portal:
 # ============================================================
 # The ESP32 serves the page. js_url cannot be raw.githubusercontent.com:
 # GitHub serves that as text/plain and the browser will not run it as JS.
-# The loader below fetches that GitHub file on every page load instead.
+# sky_remote.boot.js is a new filename so jsDelivr cannot keep a stale loader.
 #
 # Browse to:
 #   http://sky-stream-ir.local/
@@ -42,7 +42,7 @@ web_server:
   port: 80
   version: 3
   css_url: ""
-  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.loader.js"
+  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.boot.js"
 
 
 # ESP32E-N4 IR board hardware power.

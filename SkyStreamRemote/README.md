@@ -7,7 +7,7 @@ The HTTP Sky Stream remote in this repo talks to TCP 8091. That path cannot wake
 ## Files
 
 - `sky_remote.js` — remote UI, styles, key clicks, keyboard, and TV Guide.
-- `sky_remote.loader.js` — what ESPHome’s `js_url` loads; it then fetches `sky_remote.js` from GitHub.
+- `sky_remote.loader.js` / `sky_remote.boot.js` — what ESPHome’s `js_url` loads; they then fetch `sky_remote.js` from GitHub. Use `boot.js` in firmware so jsDelivr cannot keep an old cached loader.
 - `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant.
 - `SkyStreamRemote.csproj` — Rider project so these assets sit in the same solution as the player.
 
@@ -24,7 +24,7 @@ web_server:
   port: 80
   version: 3
   css_url: ""
-  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.loader.js"
+  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.boot.js"
 ```
 ## Keyboard
 
@@ -40,6 +40,8 @@ web_server:
 
 ## TV Guide
 
-TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. The page POSTs Home, waits 2 s, Down, waits 2 s, Down, waits 2 s, OK, waits 2 s, Back, waits 2 s, Down.
+TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button. The page POSTs:
 
 `Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`
+
+The footer must read `Home, Down, Down, OK, Back, Down · 2s`. If it does not, the browser still has an old script.

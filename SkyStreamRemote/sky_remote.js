@@ -10,6 +10,7 @@
     "sky_stream_back",
     "sky_stream_down"
   ];
+  const TV_GUIDE_FOOTER = "Home, Down, Down, OK, Back, Down · 2s";
 
   let sequenceBusy = false;
 
@@ -41,23 +42,45 @@
     }
   }
 
+  function prettyLabel(id) {
+    return String(id).replace("sky_stream_", "").split("_").join(" ");
+  }
+
+  function wait(ms) {
+    return new Promise(resolve => window.setTimeout(resolve, ms));
+  }
+
   async function postCommand(id, element = null) {
     if (element) {
       element.classList.add("active");
       setTimeout(() => element.classList.remove("active"), 110);
     }
 
-    const response = await fetch(`/button/${id}/press`, {
-      method: "POST",
-      body: "",
-      cache: "no-store"
-    });
+    const path = "/button/" + encodeURIComponent(id) + "/press";
+    let lastError = id + " no response";
 
-    await response.text();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetch(path, {
+          method: "POST",
+          cache: "no-store"
+        });
+        await response.text().catch(() => "");
+        if (response.ok) {
+          return;
+        }
+        lastError = prettyLabel(id) + " HTTP " + response.status;
+        if (response.status === 404 || response.status === 405) {
+          break;
+        }
+      } catch (error) {
+        lastError = prettyLabel(id) + " " + (error && error.message ? error.message : error);
+      }
 
-    if (!response.ok) {
-      throw new Error(`${id}: HTTP ${response.status}`);
+      await wait(250);
     }
+
+    throw new Error(lastError);
   }
 
   async function press(id, element = null) {
@@ -67,14 +90,14 @@
 
     try {
       await postCommand(id, element);
-      setStatus(id.replace("sky_stream_", "").replaceAll("_", " "), "ok");
+      setStatus(prettyLabel(id), "ok");
     } catch (error) {
       console.error("Sky Stream command failed:", error);
-      setStatus(`Failed: ${id}`, "error");
+      setStatus("Failed: " + (error && error.message ? error.message : id), "error", 5000);
     }
   }
 
-  function runSequence(name, steps, element = null) {
+  async function tvGuide(element = null) {
     if (sequenceBusy) {
       return;
     }
@@ -84,51 +107,30 @@
       element.classList.add("active");
     }
 
-    let index = 0;
-
-    const finish = () => {
+    try {
+      for (let index = 0; index < TV_GUIDE_STEPS.length; index++) {
+        const id = TV_GUIDE_STEPS[index];
+        setStatus(
+          "TV Guide " + (index + 1) + "/" + TV_GUIDE_STEPS.length + ": " + prettyLabel(id),
+          "",
+          0
+        );
+        await postCommand(id);
+        if (index < TV_GUIDE_STEPS.length - 1) {
+          setStatus("wait " + COMMAND_DELAY_MS + " ms before " + prettyLabel(TV_GUIDE_STEPS[index + 1]), "", 0);
+          await wait(COMMAND_DELAY_MS);
+        }
+      }
+      setStatus("TV Guide", "ok");
+    } catch (error) {
+      console.error("TV Guide sequence failed:", error);
+      setStatus("Failed: TV Guide: " + (error && error.message ? error.message : error), "error", 8000);
+    } finally {
       sequenceBusy = false;
       if (element) {
         element.classList.remove("active");
       }
-    };
-
-    const sendNext = () => {
-      if (index >= steps.length) {
-        setStatus(name, "ok");
-        finish();
-        return;
-      }
-
-      const id = steps[index];
-      const label = id.replace("sky_stream_", "").replaceAll("_", " ");
-      setStatus(`${name} ${index + 1}/${steps.length}: ${label}`, "", 0);
-
-      postCommand(id)
-        .then(() => {
-          index += 1;
-          if (index >= steps.length) {
-            setStatus(name, "ok");
-            finish();
-            return;
-          }
-
-          const nextLabel = steps[index].replace("sky_stream_", "").replaceAll("_", " ");
-          setStatus(`wait ${COMMAND_DELAY_MS} ms before ${nextLabel}`, "", 0);
-          window.setTimeout(sendNext, COMMAND_DELAY_MS);
-        })
-        .catch(error => {
-          console.error(`${name} sequence failed:`, error);
-          setStatus(`Failed: ${name}`, "error");
-          finish();
-        });
-    };
-
-    sendNext();
-  }
-
-  function tvGuide(element = null) {
-    runSequence("TV Guide", TV_GUIDE_STEPS, element);
+    }
   }
 
   
@@ -217,7 +219,7 @@
           </div>
 
           <div id="sky-status" class="status">Ready</div>
-          <div class="footer">JS waits 2 s between TV Guide keys</div>
+          <div class="footer">${TV_GUIDE_FOOTER}</div>
         </section>
       </main>
     `;
