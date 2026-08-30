@@ -39,8 +39,10 @@ Flash once after this YAML change. After that, push JS to `main` and refresh the
 
 ## TV Guide macro
 
-The TV Guide button sends one HTTP press, then **always** waits 2000 ms on a timer before it is allowed to send the next. The footer must read `2000 ms between TV Guide keys`. If it still says `ESPHome • Sky Stream IR` or `500 ms`, Opera is not on this script.
+The ESP32 fires the whole TV Guide burst on one HTTP press. Browser timers cannot space those IR codes. `sky_stream_tv_guide` now transmits Home, Down, Down, OK, Back, Down on the device with a **2 second** `delay` after each blast. Nested `button.press` does not wait, which is why it raced.
 
-`Home → 2000 ms → Down → 2000 ms → Down → 2000 ms → OK → 2000 ms → Back → 2000 ms → Down`
+You must copy `esphome/sky-stream-remote.yaml.example` into Home Assistant and flash the ESP32 once.
+
+`Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`
 
 It does not use the ESP32 `sky_stream_tv_guide` macro.
