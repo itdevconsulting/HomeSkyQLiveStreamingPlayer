@@ -39,8 +39,8 @@ Flash once after this YAML change. After that, push JS to `main` and refresh the
 
 ## TV Guide macro
 
-The TV Guide button sends one HTTP press at a time. After every press, including the last, it always waits 500 ms before the next key. A 200 from the ESP32 does not skip that pause.
+The TV Guide button sends one HTTP press, then **always** waits 500 ms on a timer before it is allowed to send the next. The footer must read `500 ms between TV Guide keys`. If it still says `ESPHome • Sky Stream IR`, Opera is not on this script.
 
-`Home → 500 ms → Down → 500 ms → Down → 500 ms → OK → 500 ms → Back → 500 ms → Down → 500 ms`
+`Home → 500 ms → Down → 500 ms → Down → 500 ms → OK → 500 ms → Back → 500 ms → Down`
 
 It does not use the ESP32 `sky_stream_tv_guide` macro.

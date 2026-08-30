@@ -41,10 +41,6 @@
     }
   }
 
-  function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
   async function postCommand(id, element = null) {
     if (element) {
       element.classList.add("active");
@@ -56,6 +52,8 @@
       body: "",
       cache: "no-store"
     });
+
+    await response.text();
 
     if (!response.ok) {
       throw new Error(`${id}: HTTP ${response.status}`);
@@ -76,7 +74,7 @@
     }
   }
 
-  async function runSequence(name, steps, element = null) {
+  function runSequence(name, steps, element = null) {
     if (sequenceBusy) {
       return;
     }
@@ -86,26 +84,47 @@
       element.classList.add("active");
     }
 
-    setStatus(name, "", 0);
+    let index = 0;
 
-    try {
-      for (const step of steps) {
-        const id = typeof step === "string" ? step : step.id;
-        setStatus(`${name}: ${id.replace("sky_stream_", "").replaceAll("_", " ")}`, "", 0);
-        await postCommand(id);
-        await delay(COMMAND_DELAY_MS);
-      }
-
-      setStatus(name, "ok");
-    } catch (error) {
-      console.error(`${name} sequence failed:`, error);
-      setStatus(`Failed: ${name}`, "error");
-    } finally {
+    const finish = () => {
       sequenceBusy = false;
       if (element) {
         element.classList.remove("active");
       }
-    }
+    };
+
+    const sendNext = () => {
+      if (index >= steps.length) {
+        setStatus(name, "ok");
+        finish();
+        return;
+      }
+
+      const id = typeof steps[index] === "string" ? steps[index] : steps[index].id;
+      const label = id.replace("sky_stream_", "").replaceAll("_", " ");
+      const stepNumber = index + 1;
+      setStatus(`${name} ${stepNumber}/${steps.length}: ${label}`, "", 0);
+
+      postCommand(id)
+        .then(() => {
+          index += 1;
+          if (index >= steps.length) {
+            setStatus(name, "ok");
+            finish();
+            return;
+          }
+
+          setStatus(`wait 500 ms before ${String(steps[index]).replace("sky_stream_", "").replaceAll("_", " ")}`, "", 0);
+          window.setTimeout(sendNext, COMMAND_DELAY_MS);
+        })
+        .catch(error => {
+          console.error(`${name} sequence failed:`, error);
+          setStatus(`Failed: ${name}`, "error");
+          finish();
+        });
+    };
+
+    sendNext();
   }
 
   function tvGuide(element = null) {
@@ -198,7 +217,7 @@
           </div>
 
           <div id="sky-status" class="status">Ready</div>
-          <div class="footer">ESPHome • Sky Stream IR</div>
+          <div class="footer">500 ms between TV Guide keys</div>
         </section>
       </main>
     `;
