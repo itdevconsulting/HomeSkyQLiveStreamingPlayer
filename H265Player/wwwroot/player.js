@@ -199,12 +199,21 @@ function clampBufferingLevel(level) {
 function getBufferingProfile(level) {
     const value = clampBufferingLevel(level);
     const labels = ["Min", "Low", "Med", "High", "Max"];
+    const mpegtsLive = {
+        enableWorker: false,
+        enableStashBuffer: true,
+        lazyLoad: false,
+        deferLoadAfterSourceOpen: false,
+        autoCleanupSourceBuffer: true,
+        fixAudioTimestampGap: true,
+        liveBufferLatencyChasing: true
+    };
     const mpegtsProfiles = [
-        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 1.5, liveBufferLatencyMinRemain: 0.3, stashInitialSize: 128 },
-        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 2.2, liveBufferLatencyMinRemain: 0.55, stashInitialSize: 256 },
-        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 3.1, liveBufferLatencyMinRemain: 0.9, stashInitialSize: 384 },
-        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 4.2, liveBufferLatencyMinRemain: 1.25, stashInitialSize: 768 },
-        { enableWorker: false, enableStashBuffer: true, liveBufferLatencyChasing: false, liveBufferLatencyMaxLatency: 5.4, liveBufferLatencyMinRemain: 1.8, stashInitialSize: 1024 }
+        { ...mpegtsLive, liveBufferLatencyMaxLatency: 1.5, liveBufferLatencyMinRemain: 0.3, stashInitialSize: 128 },
+        { ...mpegtsLive, liveBufferLatencyMaxLatency: 2.2, liveBufferLatencyMinRemain: 0.55, stashInitialSize: 256 },
+        { ...mpegtsLive, liveBufferLatencyMaxLatency: 3.1, liveBufferLatencyMinRemain: 0.9, stashInitialSize: 384 },
+        { ...mpegtsLive, liveBufferLatencyMaxLatency: 4.2, liveBufferLatencyMinRemain: 1.25, stashInitialSize: 768 },
+        { ...mpegtsLive, liveBufferLatencyChasing: false, liveBufferLatencyMaxLatency: 5.4, liveBufferLatencyMinRemain: 1.8, stashInitialSize: 1024 }
     ];
     const hlsProfiles = [
         { lowLatencyMode: true, backBufferLength: 15, maxBufferLength: 10, maxMaxBufferLength: 20, initialLiveManifestSize: 1, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 2 },
@@ -222,6 +231,146 @@ function getBufferingProfile(level) {
     };
 }
 
+function createLivePlaybackController(video, options) {
+    const onStatus = options?.onStatus;
+    const onLog = options?.onLog;
+    const playMedia = typeof options?.play === "function"
+        ? options.play
+        : () => video.play();
+    const retryDelays = options?.retryDelaysMs || [0, 120, 350, 800, 1600, 2800, 4500];
+    let stopped = false;
+    const timers = [];
+    let unmuteHook = null;
+
+    const onCanPlay = () => tryPlay("canplay");
+    const onLoadedData = () => tryPlay("loadeddata");
+    const onPlaying = () => {
+        onStatus?.("Playing");
+        tryUnmute();
+    };
+
+    function prepare() {
+        video.playsInline = true;
+        video.autoplay = true;
+        video.setAttribute("playsinline", "");
+        video.setAttribute("webkit-playsinline", "");
+        video.muted = true;
+        video.defaultMuted = true;
+        video.setAttribute("muted", "");
+    }
+
+    function armUnmuteOnGesture() {
+        if (stopped || unmuteHook) {
+            return;
+        }
+
+        unmuteHook = () => {
+            if (stopped) {
+                return;
+            }
+
+            video.muted = false;
+            video.defaultMuted = false;
+            video.removeAttribute("muted");
+            tryPlay("gesture-unmute");
+        };
+
+        window.addEventListener("pointerdown", unmuteHook, { once: true, capture: true });
+        window.addEventListener("keydown", unmuteHook, { once: true, capture: true });
+    }
+
+    function tryUnmute() {
+        if (stopped || video.paused || !video.muted) {
+            return;
+        }
+
+        video.muted = false;
+        video.defaultMuted = false;
+        video.removeAttribute("muted");
+        const playPromise = video.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch(() => {
+                if (stopped) {
+                    return;
+                }
+
+                video.muted = true;
+                video.defaultMuted = true;
+                video.setAttribute("muted", "");
+                onLog?.("Browser blocked unmuted autoplay; sound starts on the next click.");
+                armUnmuteOnGesture();
+                video.play().catch(() => null);
+            });
+        }
+    }
+
+    async function tryPlay(reason) {
+        if (stopped || !video || video.ended) {
+            return false;
+        }
+
+        if (!video.paused) {
+            tryUnmute();
+            return true;
+        }
+
+        if (reason === "media-info" || reason === "manifest-parsed" || reason === "videojs-ready" || reason === "gesture-unmute") {
+            onLog?.(`Starting playback (${reason})`);
+        }
+
+        try {
+            await playMedia();
+            if (!video.paused) {
+                tryUnmute();
+                return true;
+            }
+        } catch (error) {
+            if (!video.muted) {
+                video.muted = true;
+                video.defaultMuted = true;
+                video.setAttribute("muted", "");
+                try {
+                    await playMedia();
+                    onLog?.("Playing muted until a click unmutes");
+                    armUnmuteOnGesture();
+                    return !video.paused;
+                } catch (mutedError) {
+                    onLog?.(mutedError?.message || error?.message || "Unable to play stream");
+                    return false;
+                }
+            }
+
+            onLog?.(error?.message || "Unable to play stream");
+        }
+
+        return !video.paused;
+    }
+
+    prepare();
+    video.addEventListener("canplay", onCanPlay);
+    video.addEventListener("loadeddata", onLoadedData);
+    video.addEventListener("playing", onPlaying);
+    retryDelays.forEach((delayMs) => {
+        timers.push(window.setTimeout(() => tryPlay(`retry ${delayMs}ms`), delayMs));
+    });
+
+    return {
+        tryPlay,
+        stop() {
+            stopped = true;
+            timers.splice(0).forEach((timer) => window.clearTimeout(timer));
+            video.removeEventListener("canplay", onCanPlay);
+            video.removeEventListener("loadeddata", onLoadedData);
+            video.removeEventListener("playing", onPlaying);
+            if (unmuteHook) {
+                window.removeEventListener("pointerdown", unmuteHook, true);
+                window.removeEventListener("keydown", unmuteHook, true);
+                unmuteHook = null;
+            }
+        }
+    };
+}
+
 window.h265App = {
     _directPlayers: {},
     _ffmpegPlayer: null,
@@ -231,7 +380,9 @@ window.h265App = {
     _hlsPlayers: {},
     _altManagedPlayer: null,
     _altTsPlayer: null,
+    _altTsPlayback: null,
     _altHls: null,
+    _altHlsPlayback: null,
     _altVideoJs: null,
     _streamWatchdogs: {},
     _watchVideo: {
@@ -300,7 +451,7 @@ window.h265App = {
         }
     },
 
-    _armVideoWatchdog(key, getVideo, onStall, options) {
+    _armVideoWatchdog(key, getVideo, onStall, options, getPlayback) {
         this._clearWatchdog(key);
 
         if (!options?.enabled) {
@@ -321,10 +472,22 @@ window.h265App = {
             const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
             const bufferedEnd = this._getBufferedEnd(video);
 
-            if (video.paused || video.ended || video.seeking) {
+            if (video.ended || video.seeking) {
                 lastTime = currentTime;
                 lastBufferedEnd = bufferedEnd;
                 lastProgressAt = now;
+                return;
+            }
+
+            if (video.paused) {
+                getPlayback?.()?.tryPlay?.("watchdog-paused");
+                lastTime = currentTime;
+                lastBufferedEnd = bufferedEnd;
+                const stalledForMs = now - lastProgressAt;
+                if (stalledForMs >= options.stallAfterMs) {
+                    lastProgressAt = now;
+                    onStall(stalledForMs);
+                }
                 return;
             }
 
@@ -383,13 +546,14 @@ window.h265App = {
 
         player.attachMediaElement(video);
         player.load();
-        player.play().catch((error) => {
-            callbacks?.invokeMethodAsync("OnDirectStatusChanged", "Playback failed");
-            callbacks?.invokeMethodAsync("OnDirectLog", error?.message || "Unable to play stream");
+        const playback = createLivePlaybackController(video, {
+            play: () => player.play(),
+            onStatus: (status) => callbacks?.invokeMethodAsync("OnDirectStatusChanged", status),
+            onLog: (message) => callbacks?.invokeMethodAsync("OnDirectLog", message)
         });
-
         player.on(window.mpegts.Events.MEDIA_INFO, (info) => {
             callbacks?.invokeMethodAsync("OnDirectLog", `Media info codec=${info.videoCodec || "-"} size=${info.width || 0}x${info.height || 0}`);
+            playback.tryPlay("media-info");
         });
 
         player.on(window.mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
@@ -405,7 +569,7 @@ window.h265App = {
             callbacks?.invokeMethodAsync("OnDirectStatusChanged", "Playing");
         }, { once: true });
 
-        this._directPlayers[elementId] = { player, callbacks };
+        this._directPlayers[elementId] = { player, callbacks, playback };
         this._armVideoWatchdog(`direct:${elementId}`, () => document.getElementById(elementId), (stalledForMs) => {
             const entry = this._directPlayers[elementId];
             if (!entry || entry.restarting) {
@@ -416,7 +580,7 @@ window.h265App = {
             callbacks?.invokeMethodAsync("OnDirectStatusChanged", "Watchdog restart");
             callbacks?.invokeMethodAsync("OnDirectLog", `No media progress for ${Math.round(stalledForMs / 1000)}s. Reopening proxied stream.`);
             this.directLoadToElement(elementId, streamUrl, dotNetRef, bufferingLevel, watchdogOptions);
-        }, watchdog);
+        }, watchdog, () => this._directPlayers[elementId]?.playback);
         return { proxyUrl: proxiedUrl, status: "Loading" };
     },
 
@@ -436,6 +600,7 @@ window.h265App = {
         const entry = this._directPlayers[elementId];
         const video = document.getElementById(elementId);
         this._clearWatchdog(`direct:${elementId}`);
+        entry?.playback?.stop();
         entry?.player.pause?.();
         entry?.player.unload?.();
         entry?.player.detachMediaElement?.();
@@ -532,6 +697,8 @@ window.h265App = {
 
         if (this._altTsPlayer) {
             const video = document.getElementById("alt-ts-video");
+            this._altTsPlayback?.stop();
+            this._altTsPlayback = null;
             this._altTsPlayer.pause?.();
             this._altTsPlayer.unload?.();
             this._altTsPlayer.detachMediaElement?.();
@@ -545,11 +712,15 @@ window.h265App = {
         }
 
         if (this._altHls) {
+            this._altHlsPlayback?.stop();
+            this._altHlsPlayback = null;
             this._altHls.destroy();
             this._altHls = null;
         }
 
         if (this._altVideoJs) {
+            this._altHlsPlayback?.stop();
+            this._altHlsPlayback = null;
             this._altVideoJs.dispose();
             this._altVideoJs = null;
         }
@@ -613,6 +784,10 @@ window.h265App = {
             url: absoluteUrl
         }, {
             enableWorker: false,
+            enableStashBuffer: true,
+            lazyLoad: false,
+            deferLoadAfterSourceOpen: false,
+            autoCleanupSourceBuffer: true,
             liveBufferLatencyChasing: true,
             liveBufferLatencyMaxLatency: 2,
             liveBufferLatencyMinRemain: 0.5,
@@ -621,7 +796,10 @@ window.h265App = {
 
         player.attachMediaElement(video);
         player.load();
-        player.play().catch(() => null);
+        this._altTsPlayback = createLivePlaybackController(video, {
+            play: () => player.play()
+        });
+        player.on(window.mpegts.Events.MEDIA_INFO, () => this._altTsPlayback?.tryPlay("media-info"));
         this._altTsPlayer = player;
 
         return {
@@ -658,7 +836,8 @@ window.h265App = {
             }
 
             const player = window.videojs(video, {
-                autoplay: false,
+                autoplay: "muted",
+                muted: true,
                 controls: true,
                 preload: "auto",
                 liveui: true,
@@ -669,10 +848,12 @@ window.h265App = {
                 }
             });
             player.src({ src: resolvedUrl, type: "application/x-mpegURL" });
-            player.ready(() => {
-                player.play().catch(() => null);
+            const playback = createLivePlaybackController(video, {
+                play: () => player.play()
             });
+            player.ready(() => playback.tryPlay("videojs-ready"));
             this._altVideoJs = player;
+            this._altHlsPlayback = playback;
 
             return {
                 resolvedUrl,
@@ -684,7 +865,7 @@ window.h265App = {
 
         if (video.canPlayType("application/vnd.apple.mpegurl")) {
             video.src = resolvedUrl;
-            video.play().catch(() => null);
+            this._altHlsPlayback = createLivePlaybackController(video);
             return {
                 resolvedUrl,
                 engine: "hls.js/native",
@@ -706,10 +887,11 @@ window.h265App = {
             lowLatencyMode: true,
             backBufferLength: 30
         });
+        this._altHlsPlayback = createLivePlaybackController(video);
         hls.loadSource(resolvedUrl);
         hls.attachMedia(video);
         hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-            video.play().catch(() => null);
+            this._altHlsPlayback?.tryPlay("manifest-parsed");
         });
         this._altHls = hls;
 
@@ -726,6 +908,7 @@ window.h265App = {
     },
 
     hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel = 5, watchdogOptions = null) {
+        this._hlsPlayers[elementId]?.playback?.stop();
         this.hlsRelease();
         const resolvedUrl = useProxy ? this.getHlsProxyUrl(streamUrl) : streamUrl;
         const video = document.getElementById(elementId);
@@ -737,9 +920,11 @@ window.h265App = {
 
         if (video.canPlayType("application/vnd.apple.mpegurl")) {
             video.src = resolvedUrl;
-            video.play().catch(() => null);
+            const playback = createLivePlaybackController(video, {
+                onStatus: (status) => { this._hlsState.status = status; }
+            });
             this._hlsState = { framework: "Native HLS", status: "Loaded", lastError: "" };
-            this._hlsPlayers[elementId] = { kind: "native" };
+            this._hlsPlayers[elementId] = { kind: "native", playback };
             this._armVideoWatchdog(`hls:${elementId}`, () => document.getElementById(elementId), (stalledForMs) => {
                 const entry = this._hlsPlayers[elementId];
                 if (!entry || entry.restarting) {
@@ -753,15 +938,19 @@ window.h265App = {
                     lastError: `No media progress for ${Math.round(stalledForMs / 1000)}s. Reloading stream.`
                 };
                 this.hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel, watchdogOptions);
-            }, watchdog);
+            }, watchdog, () => this._hlsPlayers[elementId]?.playback);
             return { resolvedUrl, framework: "Native HLS", status: "Loaded" };
         }
 
         if (window.Hls && window.Hls.isSupported()) {
             const hls = new window.Hls(buffering.hls);
+            const playback = createLivePlaybackController(video, {
+                onStatus: (status) => { this._hlsState.status = status; }
+            });
             hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
                 this._hlsState.status = "Manifest parsed";
                 this._hlsState.lastError = "";
+                playback.tryPlay("manifest-parsed");
             });
             hls.on(window.Hls.Events.ERROR, (_, data) => {
                 this._hlsState.status = `hls.js error (${data.type})`;
@@ -769,11 +958,8 @@ window.h265App = {
             });
             hls.loadSource(resolvedUrl);
             hls.attachMedia(video);
-            hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-                video.play().catch(() => null);
-            });
             this._hls = hls;
-            this._hlsPlayers[elementId] = { kind: "hls", player: hls };
+            this._hlsPlayers[elementId] = { kind: "hls", player: hls, playback };
             this._hlsState = { framework: "hls.js", status: "Loading", lastError: "" };
             this._armVideoWatchdog(`hls:${elementId}`, () => document.getElementById(elementId), (stalledForMs) => {
                 const entry = this._hlsPlayers[elementId];
@@ -788,7 +974,7 @@ window.h265App = {
                     lastError: `No media progress for ${Math.round(stalledForMs / 1000)}s. Reloading stream.`
                 };
                 this.hlsLoadToElement(elementId, streamUrl, useProxy, bufferingLevel, watchdogOptions);
-            }, watchdog);
+            }, watchdog, () => this._hlsPlayers[elementId]?.playback);
             return { resolvedUrl, framework: "hls.js", status: "Loading" };
         }
 
@@ -823,6 +1009,7 @@ window.h265App = {
     },
 
     hlsRelease() {
+        this._hlsPlayers["hls-video"]?.playback?.stop();
         this._clearWatchdog("hls:hls-video");
         if (this._hls) {
             this._hls.destroy();
@@ -843,6 +1030,7 @@ window.h265App = {
     hlsReleaseElement(elementId) {
         const entry = this._hlsPlayers[elementId];
         this._clearWatchdog(`hls:${elementId}`);
+        entry?.playback?.stop();
         if (entry?.player) {
             entry.player.destroy();
         }

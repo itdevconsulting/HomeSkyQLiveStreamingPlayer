@@ -4,6 +4,8 @@
            class="@CssClass"
            style="@Style"
            controls="@Controls"
+           autoplay="@AutoPlay"
+           muted="@Muted"
            playsinline="@PlaysInline"></video>
 }
 else
@@ -28,6 +30,12 @@ else
 
     [Parameter]
     public bool Controls { get; set; }
+
+    [Parameter]
+    public bool AutoPlay { get; set; }
+
+    [Parameter]
+    public bool Muted { get; set; }
 
     [Parameter]
     public bool PlaysInline { get; set; }
