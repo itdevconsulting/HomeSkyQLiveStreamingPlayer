@@ -8,29 +8,30 @@ The HTTP Sky Stream remote in this repo talks to TCP 8091. That path cannot wake
 
 - `sky_remote.js` — remote UI, key clicks, keyboard, and the TV Guide macro.
 - `sky_remote.css` — handset styling.
-- `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant and point `css_url` / `js_url` at GitHub.
+- `sky_remote.loader.js` — fetched by ESPHome; pulls the JS and CSS from GitHub on every page load.
+- `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant.
 - `SkyStreamRemote.csproj` — Rider project so these assets sit in the same solution as the player.
 
 ## GitHub URLs for ESPHome
 
-After these files are on `main`, the ESP32 web page loads them from GitHub at browse time. You do not copy JS/CSS onto the device, and you do not rebuild firmware when you only change the remote look or layout.
+The firmware only stores a tiny loader URL. On every visit to `http://sky-stream-ir.local/`, that loader fetches `sky_remote.js` and `sky_remote.css` from GitHub `main` with `cache: no-store`. A refresh picks up a JS/CSS push without flashing the ESP32 again.
 
-Use jsDelivr, not `raw.githubusercontent.com`. GitHub raw serves `text/plain`, so browsers will not apply the CSS.
+Do not point `css_url` / `js_url` at jsDelivr copies of the handset files. jsDelivr caches `@main` for hours, so the page would keep the old remote. GitHub raw also cannot be used directly in those fields: it is served as `text/plain`, and the browser will not apply it as CSS/JS.
 
 ```yaml
 web_server:
   port: 80
   version: 3
-  css_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.css"
-  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.js"
+  css_url: ""
+  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.loader.js"
 ```
 
-Those URLs read the files from this repo:
+Flash once after this YAML change. After that, push JS/CSS to `main` and refresh the ESP32 page.
+
+The files the loader reads are:
 
 - https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/blob/main/SkyStreamRemote/sky_remote.css
 - https://github.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/blob/main/SkyStreamRemote/sky_remote.js
-
-Push to `main`, hard-refresh the ESP32 page (`http://sky-stream-ir.local/`). Firmware only needs flashing again if the YAML itself changed. jsDelivr can lag a few minutes behind `main`.
 
 ## Keyboard
 

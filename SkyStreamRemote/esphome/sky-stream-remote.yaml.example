@@ -31,9 +31,9 @@ captive_portal:
 # ============================================================
 # CUSTOM STANDALONE WEB REMOTE
 # ============================================================
-# The ESP32 serves the page; the browser pulls JS/CSS from GitHub.
-# Do not copy sky_remote.js / sky_remote.css onto the device.
-# Use jsDelivr (not raw.githubusercontent.com) so the CSS MIME type works.
+# The ESP32 serves the page. A tiny loader then fetches JS/CSS from GitHub
+# on every browser load (cache: no-store). Do not copy JS/CSS onto the device.
+# css_url is empty so ESPHome does not pin a cached stylesheet.
 #
 # Browse to:
 #   http://sky-stream-ir.local/
@@ -41,8 +41,8 @@ captive_portal:
 web_server:
   port: 80
   version: 3
-  css_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.css"
-  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.js"
+  css_url: ""
+  js_url: "https://cdn.jsdelivr.net/gh/itdevconsulting/HomeSkyQLiveStreamingPlayer@main/SkyStreamRemote/sky_remote.loader.js"
 
 
 # ESP32E-N4 IR board hardware power.
