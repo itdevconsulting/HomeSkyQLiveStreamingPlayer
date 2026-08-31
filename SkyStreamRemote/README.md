@@ -6,7 +6,7 @@ The HTTP Sky Stream remote in this repo talks to TCP 8091. That path cannot wake
 
 ## Files
 
-- `sky_remote.js` — remote UI, styles, key clicks, keyboard, TV Guide, Live TV, and per-browser delay setup.
+- `sky_remote.js` — remote UI, styles, key clicks, keyboard, TV Guide, Live TV, delay setup, and user macros.
 - `sky_remote.loader.js` / `sky_remote.boot.js` — what ESPHome’s `js_url` loads; they then fetch `sky_remote.js` from GitHub. Use `boot.js` in firmware so jsDelivr cannot keep an old cached loader.
 - `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant.
 - `SkyStreamRemote.csproj` — Rider project so these assets sit in the same solution as the player.
@@ -54,7 +54,13 @@ The footer must read `Locked during sequences`. If it does not, the browser stil
 
 **Setup** on the remote edits those waits in seconds. They are stored in `localStorage` in that browser (Home Assistant companion, Opera, etc.). The ESP32 firmware is unchanged: one IR button per key, no sequences, no macros.
 
-Save writes this browser’s overlay. Defaults restores the values above. Clearing site data forgets them. A different phone or a different HA user profile has its own copy.
+Save writes this browser’s overlay. Defaults restores the delay values above (macros are left alone). Clearing site data forgets them. A different phone or a different HA user profile has its own copy.
+
+## Macros
+
+**Setup → Macros** builds quick-access buttons that sit beside the remote. Each step is a key, a wait, **TV Guide** (uses the delay fields above), or another saved macro, so you can chain Guide then extra keys without putting sequences on the ESP32.
+
+Save macro writes to the same `localStorage` object as the delays. Up to 12 macros, 40 steps each. The rail is empty until you save one.
 
 ## Live TV
 

@@ -2,6 +2,35 @@
   "use strict";
 
   const STORAGE_KEY = "sky-stream-remote-v1";
+  const MAX_MACROS = 12;
+  const MAX_MACRO_STEPS = 40;
+  const KEY_OPTIONS = [
+    ["sky_stream_home", "Home"],
+    ["sky_stream_back", "Back"],
+    ["sky_stream_ok", "OK"],
+    ["sky_stream_up", "Up"],
+    ["sky_stream_down", "Down"],
+    ["sky_stream_left", "Left"],
+    ["sky_stream_right", "Right"],
+    ["sky_stream_1", "1"],
+    ["sky_stream_2", "2"],
+    ["sky_stream_3", "3"],
+    ["sky_stream_4", "4"],
+    ["sky_stream_5", "5"],
+    ["sky_stream_6", "6"],
+    ["sky_stream_7", "7"],
+    ["sky_stream_8", "8"],
+    ["sky_stream_9", "9"],
+    ["sky_stream_0", "0"],
+    ["sky_stream_play_pause", "Play/Pause"],
+    ["sky_stream_plus", "Plus"],
+    ["sky_stream_more", "More"],
+    ["sky_stream_colour_button", "Colour"],
+    ["sky_stream_mute", "Mute"],
+    ["sky_stream_volume_up", "Vol +"],
+    ["sky_stream_volume_down", "Vol −"],
+    ["sky_stream_power", "Power"]
+  ];
   const DEFAULT_WAITS = {
     afterHome: 5000,
     afterFirstDown: 3000,
@@ -41,48 +70,162 @@
     return Math.max(0, Math.min(30000, Math.round(number)));
   }
 
-  function loadWaits() {
+  function newMacroId() {
+    return "m" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
+  }
+
+  function normalizeStep(step) {
+    if (!step || typeof step !== "object") {
+      return null;
+    }
+    if (step.type === "press" && KEY_OPTIONS.some(option => option[0] === step.id)) {
+      return { type: "press", id: step.id };
+    }
+    if (step.type === "delay") {
+      return { type: "delay", ms: clampWaitMs(step.ms, 1000) };
+    }
+    if (step.type === "guide") {
+      return { type: "guide" };
+    }
+    if (step.type === "macro" && step.macroId) {
+      return { type: "macro", macroId: String(step.macroId) };
+    }
+    return null;
+  }
+
+  function normalizeMacro(raw) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    const name = String(raw.name || "").trim().slice(0, 24);
+    if (!name) {
+      return null;
+    }
+    const steps = Array.isArray(raw.steps)
+      ? raw.steps.map(normalizeStep).filter(Boolean).slice(0, MAX_MACRO_STEPS)
+      : [];
+    return {
+      id: String(raw.id || newMacroId()),
+      name: name,
+      steps: steps
+    };
+  }
+
+  function loadConfig() {
+    const config = {
+      waits: Object.assign({}, DEFAULT_WAITS),
+      macros: []
+    };
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) {
-        return Object.assign({}, DEFAULT_WAITS);
+        return config;
       }
       const parsed = JSON.parse(raw);
       const stored = parsed && parsed.waits ? parsed.waits : parsed;
-      const waits = Object.assign({}, DEFAULT_WAITS);
       Object.keys(DEFAULT_WAITS).forEach(name => {
         if (stored && stored[name] != null) {
-          waits[name] = clampWaitMs(stored[name], DEFAULT_WAITS[name]);
+          config.waits[name] = clampWaitMs(stored[name], DEFAULT_WAITS[name]);
         }
       });
-      return waits;
+      if (parsed && Array.isArray(parsed.macros)) {
+        config.macros = parsed.macros.map(normalizeMacro).filter(Boolean).slice(0, MAX_MACROS);
+      }
+      return config;
     } catch (error) {
-      return Object.assign({}, DEFAULT_WAITS);
+      return config;
     }
   }
 
-  function saveWaits(waits) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, waits: waits }));
+  function persistConfig() {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      v: 1,
+      waits: waits,
+      macros: macros
+    }));
   }
 
-  function guideSteps(waits) {
+  function blankEditor() {
+    return { id: null, name: "", steps: [] };
+  }
+
+  function guideSteps(currentWaits) {
     return [
       key("sky_stream_home"),
-      wait(waits.afterHome),
+      wait(currentWaits.afterHome),
       key("sky_stream_down"),
-      wait(waits.afterFirstDown),
+      wait(currentWaits.afterFirstDown),
       key("sky_stream_down"),
-      wait(waits.afterSecondDown),
+      wait(currentWaits.afterSecondDown),
       key("sky_stream_ok"),
-      wait(waits.afterOk),
+      wait(currentWaits.afterOk),
       key("sky_stream_back"),
-      wait(waits.afterBack),
+      wait(currentWaits.afterBack),
       key("sky_stream_down"),
-      wait(waits.afterLastDown)
+      wait(currentWaits.afterLastDown)
     ];
   }
 
-  let waits = loadWaits();
+  function expandSteps(steps, seen) {
+    const out = [];
+    (steps || []).forEach(step => {
+      if (step.type === "guide") {
+        out.push.apply(out, guideSteps(waits));
+        return;
+      }
+      if (step.type === "macro") {
+        if (seen.has(step.macroId)) {
+          throw new Error("Macro loop: " + step.macroId);
+        }
+        const nested = macros.find(item => item.id === step.macroId);
+        if (!nested) {
+          throw new Error("Missing macro");
+        }
+        const nextSeen = new Set(seen);
+        nextSeen.add(step.macroId);
+        out.push.apply(out, expandSteps(nested.steps, nextSeen));
+        return;
+      }
+      out.push(step);
+    });
+    return out;
+  }
+
+  function runMacro(id) {
+    const macro = macros.find(item => item.id === id);
+    if (!macro) {
+      return;
+    }
+    try {
+      const steps = expandSteps(macro.steps, new Set([macro.id]));
+      if (!steps.length) {
+        setStatus("Macro is empty", "error", 4000);
+        return;
+      }
+      return runSequence(steps, macro.name);
+    } catch (error) {
+      setStatus(error.message || "Macro failed", "error", 6000);
+    }
+  }
+
+  function draftStepLabel(step) {
+    if (step.type === "delay") {
+      return "Wait " + (step.ms / 1000) + "s";
+    }
+    if (step.type === "guide") {
+      return "TV Guide";
+    }
+    if (step.type === "macro") {
+      const nested = macros.find(item => item.id === step.macroId);
+      return "Macro · " + (nested ? nested.name : "?");
+    }
+    return prettyLabel(step.id);
+  }
+
+  const loaded = loadConfig();
+  let waits = loaded.waits;
+  let macros = loaded.macros;
+  let editor = blankEditor();
   const TV_GUIDE_FOOTER = "Locked during sequences";
   const CHANNELS = [
     [101, "BBC One", "Entertainment"],
@@ -473,6 +616,140 @@
   font: 750 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   cursor: pointer;
 }
+#sky-app {
+  width: min(100%, 454px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+}
+.remote-shell {
+  width: 320px;
+  max-width: 100%;
+  flex: 0 1 320px;
+}
+.macro-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 114px;
+  width: 114px;
+  padding-top: 18px;
+}
+.macro-empty {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
+}
+.macro-chip {
+  appearance: none;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 8px;
+  border: 2px solid #050708;
+  border-radius: 14px;
+  background: linear-gradient(150deg, var(--button), var(--button-low));
+  color: var(--text);
+  font: 750 11px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  cursor: pointer;
+  word-break: break-word;
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,.11),
+    0 4px 8px rgba(0,0,0,.38);
+}
+#sky-app.is-locked {
+  cursor: wait;
+}
+#sky-app.is-locked .macro-rail button {
+  pointer-events: none !important;
+  opacity: .42;
+}
+.setup-heading {
+  margin: 16px 0 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.macro-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.macro-saved-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+}
+.macro-saved-row span {
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.macro-mini {
+  appearance: none;
+  height: 28px;
+  padding: 0 8px;
+  border: 2px solid #050708;
+  border-radius: 10px;
+  background: #0b1014;
+  color: var(--text);
+  font: 750 11px/1 sans-serif;
+  cursor: pointer;
+}
+#macro-name,
+#macro-add-wait,
+#macro-add-key,
+#macro-add-macro {
+  width: 100%;
+  border: 2px solid #050708;
+  border-radius: 10px;
+  background: #0b1014;
+  color: var(--text);
+  font: 650 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding: 8px 8px;
+  margin-bottom: 7px;
+}
+.macro-step {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 650;
+}
+.macro-add-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+@media (max-width: 470px) {
+  #sky-app {
+    width: min(100%, 320px);
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .macro-rail {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    flex-basis: auto;
+    padding-top: 0;
+  }
+  .macro-chip {
+    flex: 1 1 96px;
+    width: auto;
+  }
+}
 `;
     document.head.appendChild(style);
   }
@@ -569,7 +846,11 @@
 
   function setUiLocked(locked) {
     sequenceBusy = locked;
+    const app = document.getElementById("sky-app");
     const { shell } = sequenceEls();
+    if (app) {
+      app.classList.toggle("is-locked", locked);
+    }
     if (shell) {
       shell.classList.toggle("is-locked", locked);
       shell.setAttribute("aria-busy", locked ? "true" : "false");
@@ -795,10 +1076,110 @@
     return next;
   }
 
+  function renderMacroRail() {
+    const rail = document.getElementById("macro-rail");
+    if (!rail) {
+      return;
+    }
+    if (!macros.length) {
+      rail.innerHTML = '<div class="macro-empty">Macros show here. Open Setup to make one.</div>';
+      return;
+    }
+    rail.innerHTML = macros.map(item => (
+      '<button type="button" class="macro-chip" data-macro-id="' +
+      escapeHtml(item.id) +
+      '">' +
+      escapeHtml(item.name) +
+      "</button>"
+    )).join("");
+    rail.querySelectorAll("[data-macro-id]").forEach(button => {
+      button.addEventListener("click", () => {
+        if (sequenceBusy) {
+          return;
+        }
+        runMacro(button.getAttribute("data-macro-id"));
+      });
+    });
+  }
+
+  function renderSavedMacros() {
+    const list = document.getElementById("macro-saved");
+    if (!list) {
+      return;
+    }
+    if (!macros.length) {
+      list.innerHTML = '<div class="macro-empty">None yet</div>';
+      return;
+    }
+    list.innerHTML = macros.map(item => (
+      '<div class="macro-saved-row">' +
+      "<span>" + escapeHtml(item.name) + "</span>" +
+      '<button type="button" class="macro-mini" data-edit-macro="' + escapeHtml(item.id) + '">Edit</button>' +
+      '<button type="button" class="macro-mini" data-delete-macro="' + escapeHtml(item.id) + '">Del</button>' +
+      "</div>"
+    )).join("");
+  }
+
+  function renderMacroSelect() {
+    const select = document.getElementById("macro-add-macro");
+    if (!select) {
+      return;
+    }
+    const others = macros.filter(item => item.id !== editor.id);
+    select.innerHTML = others.length
+      ? others.map(item => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + "</option>").join("")
+      : '<option value="">No other macros</option>';
+    select.disabled = !others.length;
+  }
+
+  function renderEditorSteps() {
+    const list = document.getElementById("macro-steps");
+    const nameInput = document.getElementById("macro-name");
+    if (nameInput && document.activeElement !== nameInput) {
+      nameInput.value = editor.name;
+    }
+    if (!list) {
+      return;
+    }
+    if (!editor.steps.length) {
+      list.innerHTML = '<div class="macro-empty">Add a key, wait, TV Guide, or another macro</div>';
+      return;
+    }
+    list.innerHTML = editor.steps.map((step, index) => (
+      '<div class="macro-step">' +
+      "<span>" + escapeHtml(draftStepLabel(step)) + "</span>" +
+      '<button type="button" class="macro-mini" data-step-move="' + index + '" data-dir="-1">↑</button>' +
+      '<button type="button" class="macro-mini" data-step-move="' + index + '" data-dir="1">↓</button>' +
+      '<button type="button" class="macro-mini" data-step-remove="' + index + '">×</button>' +
+      "</div>"
+    )).join("");
+  }
+
+  function refreshMacroUi() {
+    renderMacroRail();
+    renderSavedMacros();
+    renderMacroSelect();
+    renderEditorSteps();
+  }
+
+  function addEditorStep(step) {
+    if (editor.steps.length >= MAX_MACRO_STEPS) {
+      setStatus("Macro is full", "error", 4000);
+      return;
+    }
+    const normalized = normalizeStep(step);
+    if (!normalized) {
+      return;
+    }
+    editor.steps.push(normalized);
+    renderEditorSteps();
+  }
+
   function bindSetup() {
     const toggle = document.getElementById("setup-toggle");
     const panel = document.getElementById("setup-panel");
     fillSetupForm(waits);
+    refreshMacroUi();
 
     toggle.addEventListener("click", () => {
       if (sequenceBusy) {
@@ -809,21 +1190,145 @@
       toggle.setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening) {
         fillSetupForm(waits);
+        refreshMacroUi();
       }
     });
 
     document.getElementById("setup-save").addEventListener("click", () => {
       waits = readSetupForm();
-      saveWaits(waits);
+      persistConfig();
       fillSetupForm(waits);
       setStatus("Delays saved", "ok");
     });
 
     document.getElementById("setup-defaults").addEventListener("click", () => {
       waits = Object.assign({}, DEFAULT_WAITS);
-      saveWaits(waits);
+      persistConfig();
       fillSetupForm(waits);
-      setStatus("Defaults restored", "ok");
+      setStatus("Delay defaults restored", "ok");
+    });
+
+    document.getElementById("macro-name").addEventListener("input", event => {
+      editor.name = event.target.value.slice(0, 24);
+    });
+
+    document.getElementById("macro-add-key-btn").addEventListener("click", () => {
+      addEditorStep({ type: "press", id: document.getElementById("macro-add-key").value });
+    });
+
+    document.getElementById("macro-add-wait-btn").addEventListener("click", () => {
+      const seconds = Number(document.getElementById("macro-add-wait").value);
+      addEditorStep({ type: "delay", ms: clampWaitMs(seconds * 1000, 1000) });
+    });
+
+    document.getElementById("macro-add-guide-btn").addEventListener("click", () => {
+      addEditorStep({ type: "guide" });
+    });
+
+    document.getElementById("macro-add-macro-btn").addEventListener("click", () => {
+      const macroId = document.getElementById("macro-add-macro").value;
+      if (!macroId) {
+        return;
+      }
+      addEditorStep({ type: "macro", macroId: macroId });
+    });
+
+    document.getElementById("macro-steps").addEventListener("click", event => {
+      const remove = event.target.closest("[data-step-remove]");
+      if (remove) {
+        editor.steps.splice(Number(remove.getAttribute("data-step-remove")), 1);
+        renderEditorSteps();
+        return;
+      }
+      const move = event.target.closest("[data-step-move]");
+      if (!move) {
+        return;
+      }
+      const index = Number(move.getAttribute("data-step-move"));
+      const dir = Number(move.getAttribute("data-dir"));
+      const next = index + dir;
+      if (next < 0 || next >= editor.steps.length) {
+        return;
+      }
+      const swap = editor.steps[index];
+      editor.steps[index] = editor.steps[next];
+      editor.steps[next] = swap;
+      renderEditorSteps();
+    });
+
+    document.getElementById("macro-saved").addEventListener("click", event => {
+      const edit = event.target.closest("[data-edit-macro]");
+      if (edit) {
+        const macro = macros.find(item => item.id === edit.getAttribute("data-edit-macro"));
+        if (!macro) {
+          return;
+        }
+        editor = {
+          id: macro.id,
+          name: macro.name,
+          steps: macro.steps.map(step => Object.assign({}, step))
+        };
+        document.getElementById("macro-name").value = editor.name;
+        refreshMacroUi();
+        return;
+      }
+      const del = event.target.closest("[data-delete-macro]");
+      if (!del) {
+        return;
+      }
+      const id = del.getAttribute("data-delete-macro");
+      macros = macros.filter(item => item.id !== id);
+      macros.forEach(item => {
+        item.steps = item.steps.filter(step => !(step.type === "macro" && step.macroId === id));
+      });
+      if (editor.id === id) {
+        editor = blankEditor();
+        document.getElementById("macro-name").value = "";
+      }
+      persistConfig();
+      refreshMacroUi();
+      setStatus("Macro deleted", "ok");
+    });
+
+    document.getElementById("macro-new").addEventListener("click", () => {
+      editor = blankEditor();
+      document.getElementById("macro-name").value = "";
+      refreshMacroUi();
+    });
+
+    document.getElementById("macro-save-btn").addEventListener("click", () => {
+      const name = String(document.getElementById("macro-name").value || "").trim().slice(0, 24);
+      if (!name) {
+        setStatus("Name the macro", "error", 4000);
+        return;
+      }
+      if (!editor.steps.length) {
+        setStatus("Add at least one step", "error", 4000);
+        return;
+      }
+      const record = normalizeMacro({
+        id: editor.id || newMacroId(),
+        name: name,
+        steps: editor.steps
+      });
+      const index = macros.findIndex(item => item.id === record.id);
+      if (index >= 0) {
+        macros[index] = record;
+      } else {
+        if (macros.length >= MAX_MACROS) {
+          setStatus("Maximum " + MAX_MACROS + " macros", "error", 4000);
+          return;
+        }
+        macros.push(record);
+      }
+      editor = {
+        id: record.id,
+        name: record.name,
+        steps: record.steps.map(step => Object.assign({}, step))
+      };
+      persistConfig();
+      refreshMacroUi();
+      setStatus("Macro saved", "ok");
     });
   }
 
@@ -845,6 +1350,7 @@
 
     document.body.innerHTML = `
       <main id="sky-app">
+        <aside id="macro-rail" class="macro-rail" aria-label="Macros"></aside>
         <section class="remote-shell" aria-label="Sky Stream remote control">
 
           <div class="device-head">
@@ -961,6 +1467,33 @@
               <button type="button" id="setup-save">Save</button>
               <button type="button" id="setup-defaults">Defaults</button>
             </div>
+
+            <h3 class="setup-heading">Macros</h3>
+            <p class="setup-hint">Quick buttons sit beside the remote. Chain a key, a wait, TV Guide, or another macro.</p>
+            <div id="macro-saved" class="macro-saved"></div>
+            <input id="macro-name" type="text" maxlength="24" placeholder="Macro name" autocomplete="off" spellcheck="false">
+            <div id="macro-steps"></div>
+            <div class="macro-add-row">
+              <select id="macro-add-key">${KEY_OPTIONS.map(option =>
+                '<option value="' + option[0] + '">' + option[1] + "</option>"
+              ).join("")}</select>
+              <button type="button" class="macro-mini" id="macro-add-key-btn">+ Key</button>
+            </div>
+            <div class="macro-add-row">
+              <input id="macro-add-wait" type="number" min="0" max="30" step="0.1" value="1" inputmode="decimal" aria-label="Wait seconds">
+              <button type="button" class="macro-mini" id="macro-add-wait-btn">+ Wait</button>
+            </div>
+            <div class="macro-add-row">
+              <select id="macro-add-macro"></select>
+              <button type="button" class="macro-mini" id="macro-add-macro-btn">+ Macro</button>
+            </div>
+            <div class="setup-actions">
+              <button type="button" id="macro-add-guide-btn">+ TV Guide</button>
+              <button type="button" id="macro-new">New</button>
+            </div>
+            <div class="setup-actions">
+              <button type="button" id="macro-save-btn">Save macro</button>
+            </div>
           </div>
         </section>
       </main>
@@ -973,7 +1506,7 @@
       });
     });
 
-    document.querySelector(".remote-shell").addEventListener("click", event => {
+    document.getElementById("sky-app").addEventListener("click", event => {
       if (!sequenceBusy) {
         return;
       }
