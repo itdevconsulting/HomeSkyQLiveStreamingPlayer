@@ -6,7 +6,7 @@ The HTTP Sky Stream remote in this repo talks to TCP 8091. That path cannot wake
 
 ## Files
 
-- `sky_remote.js` — remote UI, styles, key clicks, keyboard, TV Guide, Live TV, delay setup, and user macros.
+- `sky_remote.js` — remote UI, styles, key clicks, keyboard, TV Guide, Live TV, and macros (including factory TV Guide and Channel select).
 - `sky_remote.loader.js` / `sky_remote.boot.js` — what ESPHome’s `js_url` loads; they then fetch `sky_remote.js` from GitHub. Use `boot.js` in firmware so jsDelivr cannot keep an old cached loader.
 - `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant.
 - `SkyStreamRemote.csproj` — Rider project so these assets sit in the same solution as the player.
@@ -44,27 +44,31 @@ TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. Ther
 
 The remote locks until the sequence finishes. Each item is either a press or a wait — the delay is its own step, not attached to the IR button.
 
-Defaults (this Sky Stream box):
+Factory sequence (this Sky Stream box):
 
 `Home → wait 5 s → Down → wait 3 s → Down → wait 2 s → OK → wait 2 s → Back → wait 1 s → Down → wait 5 s`
 
+That sequence is now a **factory macro** named TV Guide. Setup → Edit lets you change the waits. Reset restores the factory steps. The TV Guide button on the remote (and the chip on the left) always runs the current saved copy.
+
 The footer must read `Locked during sequences`. If it does not, the browser still has an old script.
 
-## Setup (delays)
+## Setup
 
-**Setup** opens delays and the macro builder in a panel to the **right** of the remote. Saved macros stay on the **left**. The ESP32 firmware is unchanged: one IR button per key, no sequences, no macros.
+**Setup** opens the macro list to the **right** of the remote. Saved user macros (and TV Guide) stay on the **left**. Channel select is not on the left because Live TV has to supply a channel number. The ESP32 firmware is unchanged: one IR button per key, no sequences, no macros.
 
-Save writes this browser’s overlay. Defaults restores the delay values above (macros are left alone). Clearing site data forgets them. A different phone or a different HA user profile has its own copy.
+Changes are this browser only. Clearing site data forgets them. A different phone or a different HA user profile has its own copy.
 
 ## Macros
 
-**Setup → Macros** builds quick-access buttons that sit beside the remote. Each step is a key, a wait, **TV Guide** (uses the delay fields above), or another saved macro, so you can chain Guide then extra keys without putting sequences on the ESP32.
+**Setup** lists **TV Guide** and **Channel select** first. Those are factory macros: Edit, then Save, or **Reset** if the timings get wrecked.
 
-Save macro writes to the same `localStorage` object as the delays. Up to 12 macros, 40 steps each. The rail is empty until you save one.
+Channel select is Guide, then the Live TV digits (with a gap wait), wait, OK, wait, OK. Live TV always runs this macro.
+
+Your own macros sit below. Each step is a key, a wait, **channel digits**, **TV Guide** (live reference to the factory Guide, not a snapshot), or another saved macro. Up to 12 user macros, 40 steps each. Factory macros do not count toward the 12.
 
 ## Live TV
 
-The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that Guide sequence, then the digits, a wait before OK, OK, a wait, OK. Those waits are the Setup fields for digits / after number / between OKs.
+The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs the **Channel select** factory macro, which currently starts with TV Guide, then types the number, waits, OK, waits, OK. Edit that macro (or TV Guide) if your box needs longer gaps. Reset restores the factory timings.
 
 ## IR transmitter (ESPHome)
 

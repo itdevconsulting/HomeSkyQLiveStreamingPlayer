@@ -4,6 +4,8 @@
   const STORAGE_KEY = "sky-stream-remote-v1";
   const MAX_MACROS = 12;
   const MAX_MACRO_STEPS = 40;
+  const BUILTIN_TV_GUIDE = "builtin-tv-guide";
+  const BUILTIN_CHANNEL = "builtin-channel-select";
   const KEY_OPTIONS = [
     ["sky_stream_home", "Home"],
     ["sky_stream_back", "Back"],
@@ -42,17 +44,50 @@
     beforeTuneOk: 4000,
     betweenTuneOks: 1000
   };
-  const WAIT_FIELDS = [
-    { key: "afterHome", label: "After Home" },
-    { key: "afterFirstDown", label: "After first Down" },
-    { key: "afterSecondDown", label: "After second Down" },
-    { key: "afterOk", label: "After Guide OK" },
-    { key: "afterBack", label: "After Back" },
-    { key: "afterLastDown", label: "After last Down" },
-    { key: "betweenDigits", label: "Between digits" },
-    { key: "beforeTuneOk", label: "After number, before OK" },
-    { key: "betweenTuneOks", label: "Between Live TV OKs" }
-  ];
+  function isBuiltinId(id) {
+    return id === BUILTIN_TV_GUIDE || id === BUILTIN_CHANNEL;
+  }
+
+  function cloneMacro(macro) {
+    return JSON.parse(JSON.stringify(macro));
+  }
+
+  function factoryTvGuideSteps() {
+    const w = DEFAULT_WAITS;
+    return [
+      { type: "press", id: "sky_stream_home" },
+      { type: "delay", ms: w.afterHome },
+      { type: "press", id: "sky_stream_down" },
+      { type: "delay", ms: w.afterFirstDown },
+      { type: "press", id: "sky_stream_down" },
+      { type: "delay", ms: w.afterSecondDown },
+      { type: "press", id: "sky_stream_ok" },
+      { type: "delay", ms: w.afterOk },
+      { type: "press", id: "sky_stream_back" },
+      { type: "delay", ms: w.afterBack },
+      { type: "press", id: "sky_stream_down" },
+      { type: "delay", ms: w.afterLastDown }
+    ];
+  }
+
+  function factoryChannelSelectSteps() {
+    const w = DEFAULT_WAITS;
+    return [
+      { type: "macro", macroId: BUILTIN_TV_GUIDE },
+      { type: "digits", gapMs: w.betweenDigits },
+      { type: "delay", ms: w.beforeTuneOk },
+      { type: "press", id: "sky_stream_ok" },
+      { type: "delay", ms: w.betweenTuneOks },
+      { type: "press", id: "sky_stream_ok" }
+    ];
+  }
+
+  function factoryBuiltins() {
+    return [
+      { id: BUILTIN_TV_GUIDE, name: "TV Guide", builtin: true, steps: factoryTvGuideSteps() },
+      { id: BUILTIN_CHANNEL, name: "Channel select", builtin: true, steps: factoryChannelSelectSteps() }
+    ];
+  }
 
   function key(id, label) {
     return { type: "press", id, label };
@@ -84,8 +119,11 @@
     if (step.type === "delay") {
       return { type: "delay", ms: clampWaitMs(step.ms, 1000) };
     }
+    if (step.type === "digits") {
+      return { type: "digits", gapMs: clampWaitMs(step.gapMs != null ? step.gapMs : 600, 600) };
+    }
     if (step.type === "guide") {
-      return { type: "guide" };
+      return { type: "macro", macroId: BUILTIN_TV_GUIDE };
     }
     if (step.type === "macro" && step.macroId) {
       return { type: "macro", macroId: String(step.macroId) };
@@ -107,14 +145,37 @@
     return {
       id: String(raw.id || newMacroId()),
       name: name,
+      builtin: isBuiltinId(String(raw.id || "")),
       steps: steps
     };
+  }
+
+  function mergeBuiltins(storedMacros) {
+    const stored = (storedMacros || []).map(normalizeMacro).filter(Boolean);
+    const byId = {};
+    stored.forEach(item => {
+      byId[item.id] = item;
+    });
+    const builtins = factoryBuiltins().map(factory => {
+      const existing = byId[factory.id];
+      if (!existing) {
+        return cloneMacro(factory);
+      }
+      return {
+        id: factory.id,
+        name: existing.name || factory.name,
+        builtin: true,
+        steps: existing.steps.length ? existing.steps : factory.steps
+      };
+    });
+    const users = stored.filter(item => !isBuiltinId(item.id));
+    return builtins.concat(users);
   }
 
   function loadConfig() {
     const config = {
       waits: Object.assign({}, DEFAULT_WAITS),
-      macros: []
+      macros: factoryBuiltins()
     };
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -128,9 +189,7 @@
           config.waits[name] = clampWaitMs(stored[name], DEFAULT_WAITS[name]);
         }
       });
-      if (parsed && Array.isArray(parsed.macros)) {
-        config.macros = parsed.macros.map(normalizeMacro).filter(Boolean).slice(0, MAX_MACROS);
-      }
+      config.macros = mergeBuiltins(parsed && parsed.macros);
       return config;
     } catch (error) {
       return config;
@@ -149,28 +208,28 @@
     return { id: null, name: "", steps: [] };
   }
 
-  function guideSteps(currentWaits) {
-    return [
-      key("sky_stream_home"),
-      wait(currentWaits.afterHome),
-      key("sky_stream_down"),
-      wait(currentWaits.afterFirstDown),
-      key("sky_stream_down"),
-      wait(currentWaits.afterSecondDown),
-      key("sky_stream_ok"),
-      wait(currentWaits.afterOk),
-      key("sky_stream_back"),
-      wait(currentWaits.afterBack),
-      key("sky_stream_down"),
-      wait(currentWaits.afterLastDown)
-    ];
-  }
-
-  function expandSteps(steps, seen) {
+  function expandSteps(steps, seen, context) {
     const out = [];
     (steps || []).forEach(step => {
       if (step.type === "guide") {
-        out.push.apply(out, guideSteps(waits));
+        out.push.apply(out, expandSteps(
+          [{ type: "macro", macroId: BUILTIN_TV_GUIDE }],
+          seen,
+          context
+        ));
+        return;
+      }
+      if (step.type === "digits") {
+        const digits = context && context.digits ? String(context.digits) : "";
+        if (!digits) {
+          return;
+        }
+        [...digits].forEach(digit => {
+          out.push(key("sky_stream_" + digit));
+          if (step.gapMs > 0) {
+            out.push(wait(step.gapMs));
+          }
+        });
         return;
       }
       if (step.type === "macro") {
@@ -183,7 +242,7 @@
         }
         const nextSeen = new Set(seen);
         nextSeen.add(step.macroId);
-        out.push.apply(out, expandSteps(nested.steps, nextSeen));
+        out.push.apply(out, expandSteps(nested.steps, nextSeen, context));
         return;
       }
       out.push(step);
@@ -191,18 +250,18 @@
     return out;
   }
 
-  function runMacro(id) {
+  function runMacro(id, context) {
     const macro = macros.find(item => item.id === id);
     if (!macro) {
       return;
     }
     try {
-      const steps = expandSteps(macro.steps, new Set([macro.id]));
+      const steps = expandSteps(macro.steps, new Set([macro.id]), context || {});
       if (!steps.length) {
         setStatus("Macro is empty", "error", 4000);
         return;
       }
-      return runSequence(steps, macro.name);
+      return runSequence(steps, (context && context.title) || macro.name);
     } catch (error) {
       setStatus(error.message || "Macro failed", "error", 6000);
     }
@@ -212,8 +271,8 @@
     if (step.type === "delay") {
       return "Wait " + (step.ms / 1000) + "s";
     }
-    if (step.type === "guide") {
-      return "TV Guide";
+    if (step.type === "digits") {
+      return "Channel digits · " + (step.gapMs / 1000) + "s gap";
     }
     if (step.type === "macro") {
       const nested = macros.find(item => item.id === step.macroId);
@@ -718,7 +777,7 @@
   opacity: .42;
 }
 .setup-heading {
-  margin: 16px 0 8px;
+  margin: 0 0 8px;
   color: var(--text);
   font-size: 12px;
   font-weight: 800;
@@ -744,6 +803,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.macro-saved-row.is-builtin span {
+  white-space: normal;
+  line-height: 1.25;
+}
+.macro-tag {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 650;
+  letter-spacing: .2px;
 }
 .macro-mini {
   appearance: none;
@@ -1043,7 +1115,7 @@
   }
 
   function tvGuide() {
-    return runSequence(guideSteps(waits), "TV Guide");
+    return runMacro(BUILTIN_TV_GUIDE);
   }
 
   function setLiveTvDisabled(disabled) {
@@ -1106,17 +1178,7 @@
       return;
     }
 
-    const steps = guideSteps(waits);
-    [...digits].forEach(digit => {
-      steps.push(key("sky_stream_" + digit));
-      steps.push(wait(waits.betweenDigits));
-    });
-    steps.push(wait(waits.beforeTuneOk));
-    steps.push(key("sky_stream_ok", "ok"));
-    steps.push(wait(waits.betweenTuneOks));
-    steps.push(key("sky_stream_ok", "ok"));
-
-    await runSequence(steps, "Live TV " + digits);
+    await runMacro(BUILTIN_CHANNEL, { digits: digits, title: "Live TV " + digits });
 
     const select = document.getElementById("live-tv-select");
     if (select) {
@@ -1125,25 +1187,31 @@
   }
 
   
-  function fillSetupForm(current) {
-    WAIT_FIELDS.forEach(field => {
-      const input = document.getElementById("wait-" + field.key);
-      if (input) {
-        input.value = String(current[field.key] / 1000);
-      }
-    });
+  function resetBuiltin(id) {
+    const factory = factoryBuiltins().find(item => item.id === id);
+    if (!factory) {
+      return;
+    }
+    const index = macros.findIndex(item => item.id === id);
+    if (index >= 0) {
+      macros[index] = cloneMacro(factory);
+    } else {
+      macros.unshift(cloneMacro(factory));
+    }
+    persistConfig();
+    if (editor.id === id) {
+      editor = {
+        id: factory.id,
+        name: factory.name,
+        steps: factory.steps.map(step => Object.assign({}, step))
+      };
+    }
+    refreshMacroUi();
+    setStatus(factory.name + " reset", "ok");
   }
 
-  function readSetupForm() {
-    const next = Object.assign({}, DEFAULT_WAITS);
-    WAIT_FIELDS.forEach(field => {
-      const input = document.getElementById("wait-" + field.key);
-      if (!input) {
-        return;
-      }
-      next[field.key] = clampWaitMs(Number(input.value) * 1000, DEFAULT_WAITS[field.key]);
-    });
-    return next;
+  function userMacroCount() {
+    return macros.filter(item => !item.builtin).length;
   }
 
   function renderMacroRail() {
@@ -1151,11 +1219,12 @@
     if (!rail) {
       return;
     }
-    if (!macros.length) {
+    const railMacros = macros.filter(item => item.id !== BUILTIN_CHANNEL);
+    if (!railMacros.length) {
       rail.innerHTML = '<div class="macro-empty">Macros show here. Open Setup to make one.</div>';
       return;
     }
-    rail.innerHTML = macros.map(item => (
+    rail.innerHTML = railMacros.map(item => (
       '<button type="button" class="macro-chip" data-macro-id="' +
       escapeHtml(item.id) +
       '">' +
@@ -1182,10 +1251,14 @@
       return;
     }
     list.innerHTML = macros.map(item => (
-      '<div class="macro-saved-row">' +
-      "<span>" + escapeHtml(item.name) + "</span>" +
+      '<div class="macro-saved-row' + (item.builtin ? " is-builtin" : "") + '">' +
+      "<span>" + escapeHtml(item.name) +
+      (item.builtin ? '<em class="macro-tag">Factory · Reset if you mess it up</em>' : "") +
+      "</span>" +
       '<button type="button" class="macro-mini" data-edit-macro="' + escapeHtml(item.id) + '">Edit</button>' +
-      '<button type="button" class="macro-mini" data-delete-macro="' + escapeHtml(item.id) + '">Del</button>' +
+      (item.builtin
+        ? '<button type="button" class="macro-mini" data-reset-macro="' + escapeHtml(item.id) + '">Reset</button>'
+        : '<button type="button" class="macro-mini" data-delete-macro="' + escapeHtml(item.id) + '">Del</button>') +
       "</div>"
     )).join("");
   }
@@ -1195,7 +1268,7 @@
     if (!select) {
       return;
     }
-    const others = macros.filter(item => item.id !== editor.id);
+    const others = macros.filter(item => item.id !== editor.id && item.id !== BUILTIN_CHANNEL);
     select.innerHTML = others.length
       ? others.map(item => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + "</option>").join("")
       : '<option value="">No other macros</option>';
@@ -1212,7 +1285,7 @@
       return;
     }
     if (!editor.steps.length) {
-      list.innerHTML = '<div class="macro-empty">Add a key, wait, TV Guide, or another macro</div>';
+      list.innerHTML = '<div class="macro-empty">Add a key, wait, digits, TV Guide, or another macro</div>';
       return;
     }
     list.innerHTML = editor.steps.map((step, index) => (
@@ -1248,7 +1321,6 @@
   function bindSetup() {
     const toggle = document.getElementById("setup-toggle");
     const panel = document.getElementById("setup-panel");
-    fillSetupForm(waits);
     refreshMacroUi();
 
     toggle.addEventListener("click", () => {
@@ -1260,23 +1332,8 @@
       document.getElementById("sky-app").classList.toggle("is-setup", opening);
       toggle.setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening) {
-        fillSetupForm(waits);
         refreshMacroUi();
       }
-    });
-
-    document.getElementById("setup-save").addEventListener("click", () => {
-      waits = readSetupForm();
-      persistConfig();
-      fillSetupForm(waits);
-      setStatus("Delays saved", "ok");
-    });
-
-    document.getElementById("setup-defaults").addEventListener("click", () => {
-      waits = Object.assign({}, DEFAULT_WAITS);
-      persistConfig();
-      fillSetupForm(waits);
-      setStatus("Delay defaults restored", "ok");
     });
 
     document.getElementById("macro-name").addEventListener("input", event => {
@@ -1292,8 +1349,17 @@
       addEditorStep({ type: "delay", ms: clampWaitMs(seconds * 1000, 1000) });
     });
 
+    document.getElementById("macro-add-digits-btn").addEventListener("click", () => {
+      const seconds = Number(document.getElementById("macro-add-wait").value);
+      addEditorStep({ type: "digits", gapMs: clampWaitMs(seconds * 1000, 600) });
+    });
+
     document.getElementById("macro-add-guide-btn").addEventListener("click", () => {
-      addEditorStep({ type: "guide" });
+      if (editor.id === BUILTIN_TV_GUIDE) {
+        setStatus("TV Guide cannot include itself", "error", 4000);
+        return;
+      }
+      addEditorStep({ type: "macro", macroId: BUILTIN_TV_GUIDE });
     });
 
     document.getElementById("macro-add-macro-btn").addEventListener("click", () => {
@@ -1343,11 +1409,19 @@
         refreshMacroUi();
         return;
       }
+      const reset = event.target.closest("[data-reset-macro]");
+      if (reset) {
+        resetBuiltin(reset.getAttribute("data-reset-macro"));
+        return;
+      }
       const del = event.target.closest("[data-delete-macro]");
       if (!del) {
         return;
       }
       const id = del.getAttribute("data-delete-macro");
+      if (isBuiltinId(id)) {
+        return;
+      }
       macros = macros.filter(item => item.id !== id);
       macros.forEach(item => {
         item.steps = item.steps.filter(step => !(step.type === "macro" && step.macroId === id));
@@ -1378,15 +1452,18 @@
         return;
       }
       const record = normalizeMacro({
-        id: editor.id || newMacroId(),
+        id: isBuiltinId(editor.id) ? editor.id : (editor.id || newMacroId()),
         name: name,
         steps: editor.steps
       });
+      if (isBuiltinId(record.id)) {
+        record.builtin = true;
+      }
       const index = macros.findIndex(item => item.id === record.id);
       if (index >= 0) {
         macros[index] = record;
       } else {
-        if (macros.length >= MAX_MACROS) {
+        if (userMacroCount() >= MAX_MACROS) {
           setStatus("Maximum " + MAX_MACROS + " macros", "error", 4000);
           return;
         }
@@ -1534,19 +1611,8 @@
         </section>
 
         <aside id="setup-panel" class="setup-panel" hidden aria-label="Setup">
-            <p class="setup-hint">Seconds for this browser only. The ESP32 only sends IR.</p>
-            ${WAIT_FIELDS.map(field => `
-            <div class="setup-row">
-              <label for="wait-${field.key}">${field.label}</label>
-              <input id="wait-${field.key}" type="number" min="0" max="30" step="0.1" inputmode="decimal" data-wait="${field.key}" aria-label="${field.label} in seconds">
-            </div>`).join("")}
-            <div class="setup-actions">
-              <button type="button" id="setup-save">Save</button>
-              <button type="button" id="setup-defaults">Defaults</button>
-            </div>
-
             <h3 class="setup-heading">Macros</h3>
-            <p class="setup-hint">Quick buttons sit beside the remote. Chain a key, a wait, TV Guide, or another macro.</p>
+            <p class="setup-hint">TV Guide and Channel select are factory macros. Edit the waits for your Sky Stream box. Reset restores the working sequence. Channel select is used by Live TV, so it is not on the left rail.</p>
             <div id="macro-saved" class="macro-saved"></div>
             <input id="macro-name" type="text" maxlength="24" placeholder="Macro name" autocomplete="off" spellcheck="false">
             <div id="macro-steps"></div>
@@ -1566,9 +1632,10 @@
             </div>
             <div class="setup-actions">
               <button type="button" id="macro-add-guide-btn">+ TV Guide</button>
-              <button type="button" id="macro-new">New</button>
+              <button type="button" id="macro-add-digits-btn">+ Digits</button>
             </div>
             <div class="setup-actions">
+              <button type="button" id="macro-new">New</button>
               <button type="button" id="macro-save-btn">Save macro</button>
             </div>
         </aside>
