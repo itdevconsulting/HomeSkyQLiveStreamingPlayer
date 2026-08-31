@@ -474,8 +474,6 @@
     style.textContent = `
 .live-tv {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
   width: 226px;
   margin: 0 auto 14px;
 }
@@ -518,14 +516,6 @@
   transform: rotate(-38deg);
   box-shadow: 0 0 0 1px #161b20;
 }
-.live-tv-label {
-  text-align: center;
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: .4px;
-  color: var(--muted);
-}
-.live-tv-search,
 .live-tv-select {
   appearance: none;
   width: 100%;
@@ -538,19 +528,11 @@
   box-shadow:
     inset 0 1px 1px rgba(255,255,255,.11),
     0 4px 8px rgba(0,0,0,.38);
+  cursor: pointer;
 }
-.live-tv-search::placeholder {
-  color: var(--muted);
-  font-weight: 500;
-}
-.live-tv-search:focus,
 .live-tv-select:focus {
   outline: 1px solid rgba(23,140,255,.55);
 }
-.live-tv-select {
-  cursor: pointer;
-}
-.live-tv-search:disabled,
 .live-tv-select:disabled {
   opacity: .55;
   cursor: not-allowed;
@@ -1119,11 +1101,7 @@
   }
 
   function setLiveTvDisabled(disabled) {
-    const search = document.getElementById("live-tv-search");
     const select = document.getElementById("live-tv-select");
-    if (search) {
-      search.disabled = disabled;
-    }
     if (select) {
       select.disabled = disabled;
     }
@@ -1137,16 +1115,11 @@
       .replace(/"/g, "&quot;");
   }
 
-  function channelOptionsHtml(filter) {
-    const query = String(filter || "").trim().toLowerCase();
+  function channelOptionsHtml() {
     const groups = [];
     const indexByCat = {};
 
     CHANNELS.forEach(([number, name, category]) => {
-      if (query && !name.toLowerCase().includes(query) && !String(number).includes(query)) {
-        return;
-      }
-
       let groupIndex = indexByCat[category];
       if (groupIndex == null) {
         groupIndex = groups.length;
@@ -1573,17 +1546,8 @@
           </div>
 
           <div class="live-tv">
-            <div class="live-tv-label">Live TV</div>
-            <input
-              type="search"
-              id="live-tv-search"
-              class="live-tv-search"
-              placeholder="Find channel"
-              autocomplete="off"
-              spellcheck="false"
-              aria-label="Search channels">
             <select id="live-tv-select" class="live-tv-select" aria-label="Live TV">
-              ${channelOptionsHtml("")}
+              ${channelOptionsHtml()}
             </select>
           </div>
 
@@ -1662,16 +1626,7 @@
       tvGuide();
     });
 
-    const liveTvSearch = document.getElementById("live-tv-search");
     const liveTvSelect = document.getElementById("live-tv-select");
-
-    liveTvSearch.addEventListener("input", () => {
-      const current = liveTvSelect.value;
-      liveTvSelect.innerHTML = channelOptionsHtml(liveTvSearch.value);
-      if ([...liveTvSelect.options].some(option => option.value === current)) {
-        liveTvSelect.value = current;
-      }
-    });
 
     liveTvSelect.addEventListener("change", () => {
       if (!liveTvSelect.value) {

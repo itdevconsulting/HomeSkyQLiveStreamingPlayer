@@ -68,7 +68,7 @@ Your own macros sit below. Each step is a key, a wait, **channel digits**, **TV 
 
 ## Live TV
 
-The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs the **Channel select** factory macro, which currently starts with TV Guide, then types the number, waits, OK, waits, OK. Edit that macro (or TV Guide) if your box needs longer gaps. Reset restores the factory timings.
+The dropdown uses the same channel list as the Blazor Sky Stream picker (category groups). Choosing a channel runs the **Channel select** factory macro, which currently starts with TV Guide, then types the number, waits, OK, waits, OK. Edit that macro (or TV Guide) if your box needs longer gaps. Reset restores the factory timings.
 
 ## IR transmitter (ESPHome)
 
