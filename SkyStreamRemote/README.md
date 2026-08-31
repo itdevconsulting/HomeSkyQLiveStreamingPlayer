@@ -42,9 +42,9 @@ web_server:
 
 TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button.
 
-The remote locks until the sequence finishes. Waits are after each key, and they match how slow Sky Stream is:
+The remote locks until the sequence finishes. Each item is either a press or a wait — the delay is its own step, not attached to the IR button:
 
-`Home → 5 s → Down → 0.5 s → Down → 3 s → OK → 3 s → Back → 1 s → Down → 2 s`
+`Home → wait 5 s → Down → wait 0.5 s → Down → wait 3 s → OK → wait 3 s → Back → wait 1 s → Down → wait 2 s`
 
 The footer must read `Locked during sequences`. If it does not, the browser still has an old script.
 

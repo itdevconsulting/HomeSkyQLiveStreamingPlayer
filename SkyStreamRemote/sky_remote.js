@@ -8,13 +8,28 @@
   const AFTER_BACK_MS = 1000;
   const AFTER_LAST_DOWN_MS = 2000;
   const DIGIT_DELAY_MS = 500;
+
+  function key(id, label) {
+    return { type: "press", id, label };
+  }
+
+  function wait(ms) {
+    return { type: "delay", ms };
+  }
+
   const TV_GUIDE_STEPS = [
-    { id: "sky_stream_home", gapMs: HOME_SETTLE_MS },
-    { id: "sky_stream_down", gapMs: QUICK_MS },
-    { id: "sky_stream_down", gapMs: AFTER_MENU_DOWN_MS },
-    { id: "sky_stream_ok", gapMs: AFTER_OK_MS },
-    { id: "sky_stream_back", gapMs: AFTER_BACK_MS },
-    { id: "sky_stream_down", gapMs: AFTER_LAST_DOWN_MS }
+    key("sky_stream_home"),
+    wait(HOME_SETTLE_MS),
+    key("sky_stream_down"),
+    wait(QUICK_MS),
+    key("sky_stream_down"),
+    wait(AFTER_MENU_DOWN_MS),
+    key("sky_stream_ok"),
+    wait(AFTER_OK_MS),
+    key("sky_stream_back"),
+    wait(AFTER_BACK_MS),
+    key("sky_stream_down"),
+    wait(AFTER_LAST_DOWN_MS)
   ];
   const TV_GUIDE_FOOTER = "Locked during sequences";
   const CHANNELS = [
@@ -391,6 +406,9 @@
     if (!step) {
       return "";
     }
+    if (step.type === "delay") {
+      return (step.ms / 1000).toFixed(1) + "s wait";
+    }
     return step.label || prettyLabel(step.id);
   }
 
@@ -435,7 +453,7 @@
     }
   }
 
-  async function countdownBar(ms, currentName, nextName) {
+  async function countdownBar(ms, nextName) {
     const { bar, caption: captionEl } = sequenceEls();
     const started = performance.now();
 
@@ -452,8 +470,8 @@
       }
 
       const caption = nextName
-        ? "After " + currentName + " · " + (remainingMs / 1000).toFixed(1) + "s then " + nextName
-        : "After " + currentName + " · " + (remainingMs / 1000).toFixed(1) + "s";
+        ? "Wait " + (remainingMs / 1000).toFixed(1) + "s then " + nextName
+        : "Wait " + (remainingMs / 1000).toFixed(1) + "s";
       if (captionEl) {
         captionEl.textContent = caption;
       }
@@ -496,16 +514,23 @@
     try {
       for (let index = 0; index < steps.length; index++) {
         const step = steps[index];
-        const nextStep = steps[index + 1];
         const name = stepName(step);
-        const nextName = stepName(nextStep);
+        const nextName = stepName(steps[index + 1]);
+
+        if (step.type === "delay") {
+          showSequenceHud(name, nextName, "Wait");
+          setStatus("Wait", "", 0);
+          await countdownBar(step.ms, nextName);
+          continue;
+        }
+
+        if (step.type !== "press" || !step.id) {
+          throw new Error("Unknown sequence step");
+        }
+
         showSequenceHud(name, nextName, "Sending " + name);
         setStatus("Sending " + name, "", 0);
         await sendAndWait(step.id);
-        if (step.gapMs > 0) {
-          showSequenceHud(name, nextName, "After " + name);
-          await countdownBar(step.gapMs, name, nextName);
-        }
       }
       setStatus(doneMessage, "ok");
     } catch (error) {
@@ -600,12 +625,15 @@
       return;
     }
 
-    const steps = TV_GUIDE_STEPS.map(step => ({ id: step.id, gapMs: step.gapMs }));
+    const steps = TV_GUIDE_STEPS.slice();
     [...digits].forEach(digit => {
-      steps.push({ id: "sky_stream_" + digit, gapMs: DIGIT_DELAY_MS });
+      steps.push(key("sky_stream_" + digit));
+      steps.push(wait(DIGIT_DELAY_MS));
     });
-    steps.push({ id: "sky_stream_ok", gapMs: AFTER_OK_MS, label: "ok 1" });
-    steps.push({ id: "sky_stream_ok", gapMs: AFTER_OK_MS, label: "ok 2" });
+    steps.push(key("sky_stream_ok", "ok 1"));
+    steps.push(wait(AFTER_OK_MS));
+    steps.push(key("sky_stream_ok", "ok 2"));
+    steps.push(wait(AFTER_OK_MS));
 
     await runSequence(steps, "Live TV " + digits);
 
