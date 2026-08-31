@@ -263,19 +263,6 @@ function createLivePlaybackController(video, options) {
         video.removeEventListener("loadeddata", onLoadedData);
     }
 
-    function dismissNativeSpinner() {
-        if (stopped || !video.controls) {
-            return;
-        }
-
-        video.controls = false;
-        window.requestAnimationFrame(() => {
-            if (!stopped) {
-                video.controls = true;
-            }
-        });
-    }
-
     function markStarted() {
         if (stopped || started) {
             return;
@@ -284,7 +271,6 @@ function createLivePlaybackController(video, options) {
         started = true;
         onStatus?.("Playing");
         clearStartRetries();
-        dismissNativeSpinner();
         armUnmuteOnGesture();
     }
 
@@ -302,7 +288,9 @@ function createLivePlaybackController(video, options) {
             video.muted = false;
             video.defaultMuted = false;
             video.removeAttribute("muted");
-            video.play().catch(() => null);
+            if (video.paused) {
+                video.play().catch(() => null);
+            }
         };
 
         window.addEventListener("pointerdown", unmuteHook, { once: true, capture: true });

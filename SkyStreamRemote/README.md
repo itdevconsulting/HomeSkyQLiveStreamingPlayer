@@ -40,8 +40,10 @@ web_server:
 
 ## TV Guide
 
-TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button. The page POSTs:
+TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button.
+
+The page sends one key, then waits 2 seconds on a visible countdown, then sends the next:
 
 `Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`
 
-The footer must read `Home, Down, Down, OK, Back, Down · 2s`. If it does not, the browser still has an old script.
+The footer must read `2s gap after every key`. If it does not, the browser still has an old script.

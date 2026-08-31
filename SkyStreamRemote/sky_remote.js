@@ -10,7 +10,7 @@
     "sky_stream_back",
     "sky_stream_down"
   ];
-  const TV_GUIDE_FOOTER = "Home, Down, Down, OK, Back, Down · 2s";
+  const TV_GUIDE_FOOTER = "2s gap after every key";
 
   let sequenceBusy = false;
 
@@ -46,41 +46,17 @@
     return String(id).replace("sky_stream_", "").split("_").join(" ");
   }
 
-  function wait(ms) {
+  function sleep(ms) {
     return new Promise(resolve => window.setTimeout(resolve, ms));
   }
 
-  async function postCommand(id, element = null) {
+  function postCommand(id, element = null) {
     if (element) {
       element.classList.add("active");
       setTimeout(() => element.classList.remove("active"), 110);
     }
 
-    const path = "/button/" + encodeURIComponent(id) + "/press";
-    let lastError = id + " no response";
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const response = await fetch(path, {
-          method: "POST",
-          cache: "no-store"
-        });
-        await response.text().catch(() => "");
-        if (response.ok) {
-          return;
-        }
-        lastError = prettyLabel(id) + " HTTP " + response.status;
-        if (response.status === 404 || response.status === 405) {
-          break;
-        }
-      } catch (error) {
-        lastError = prettyLabel(id) + " " + (error && error.message ? error.message : error);
-      }
-
-      await wait(250);
-    }
-
-    throw new Error(lastError);
+    return fetch("/button/" + id + "/press", { method: "POST", cache: "no-store" });
   }
 
   async function press(id, element = null) {
@@ -89,11 +65,23 @@
     }
 
     try {
-      await postCommand(id, element);
+      const response = await postCommand(id, element);
+      if (!response.ok) {
+        throw new Error(prettyLabel(id) + " HTTP " + response.status);
+      }
       setStatus(prettyLabel(id), "ok");
     } catch (error) {
       console.error("Sky Stream command failed:", error);
       setStatus("Failed: " + (error && error.message ? error.message : id), "error", 5000);
+    }
+  }
+
+  async function sleepWithCountdown(ms, message) {
+    const endsAt = Date.now() + ms;
+    while (Date.now() < endsAt) {
+      const left = Math.max(1, Math.ceil((endsAt - Date.now()) / 1000));
+      setStatus(message + " " + left + "s", "", 0);
+      await sleep(Math.max(0, Math.min(250, endsAt - Date.now())));
     }
   }
 
@@ -110,15 +98,10 @@
     try {
       for (let index = 0; index < TV_GUIDE_STEPS.length; index++) {
         const id = TV_GUIDE_STEPS[index];
-        setStatus(
-          "TV Guide " + (index + 1) + "/" + TV_GUIDE_STEPS.length + ": " + prettyLabel(id),
-          "",
-          0
-        );
-        await postCommand(id);
+        setStatus("TV Guide " + (index + 1) + "/" + TV_GUIDE_STEPS.length + ": " + prettyLabel(id), "", 0);
+        postCommand(id).catch(() => {});
         if (index < TV_GUIDE_STEPS.length - 1) {
-          setStatus("wait " + COMMAND_DELAY_MS + " ms before " + prettyLabel(TV_GUIDE_STEPS[index + 1]), "", 0);
-          await wait(COMMAND_DELAY_MS);
+          await sleepWithCountdown(COMMAND_DELAY_MS, "wait then " + prettyLabel(TV_GUIDE_STEPS[index + 1]));
         }
       }
       setStatus("TV Guide", "ok");
