@@ -1,17 +1,19 @@
 (() => {
   "use strict";
 
-  const COMMAND_DELAY_MS = 3000;
+  const HOME_SETTLE_MS = 5000;
+  const QUICK_MS = 500;
+  const SLOW_SETTLE_MS = 4000;
+  const DIGIT_DELAY_MS = 500;
   const TV_GUIDE_STEPS = [
-    "sky_stream_home",
-    "sky_stream_down",
-    "sky_stream_down",
-    "sky_stream_ok",
-    "sky_stream_back",
-    "sky_stream_down"
+    { id: "sky_stream_home", gapMs: HOME_SETTLE_MS },
+    { id: "sky_stream_down", gapMs: QUICK_MS },
+    { id: "sky_stream_down", gapMs: QUICK_MS },
+    { id: "sky_stream_ok", gapMs: SLOW_SETTLE_MS },
+    { id: "sky_stream_back", gapMs: SLOW_SETTLE_MS },
+    { id: "sky_stream_down", gapMs: SLOW_SETTLE_MS }
   ];
   const TV_GUIDE_FOOTER = "Locked during sequences";
-  const DIGIT_DELAY_MS = 500;
   const CHANNELS = [
     [101, "BBC One", "Entertainment"],
     [102, "BBC Two", "Entertainment"],
@@ -532,13 +534,7 @@
   }
 
   function tvGuide() {
-    return runSequence(
-      TV_GUIDE_STEPS.map(id => ({
-        id,
-        gapMs: COMMAND_DELAY_MS
-      })),
-      "TV Guide"
-    );
+    return runSequence(TV_GUIDE_STEPS, "TV Guide");
   }
 
   function setLiveTvDisabled(disabled) {
@@ -601,15 +597,12 @@
       return;
     }
 
-    const steps = TV_GUIDE_STEPS.map(id => ({ id, gapMs: COMMAND_DELAY_MS }));
-    [...digits].forEach((digit, index, all) => {
-      steps.push({
-        id: "sky_stream_" + digit,
-        gapMs: index === all.length - 1 ? COMMAND_DELAY_MS : DIGIT_DELAY_MS
-      });
+    const steps = TV_GUIDE_STEPS.map(step => ({ id: step.id, gapMs: step.gapMs }));
+    [...digits].forEach(digit => {
+      steps.push({ id: "sky_stream_" + digit, gapMs: DIGIT_DELAY_MS });
     });
-    steps.push({ id: "sky_stream_ok", gapMs: COMMAND_DELAY_MS, label: "ok 1" });
-    steps.push({ id: "sky_stream_ok", gapMs: COMMAND_DELAY_MS, label: "ok 2" });
+    steps.push({ id: "sky_stream_ok", gapMs: SLOW_SETTLE_MS, label: "ok 1" });
+    steps.push({ id: "sky_stream_ok", gapMs: SLOW_SETTLE_MS, label: "ok 2" });
 
     await runSequence(steps, "Live TV " + digits);
 
