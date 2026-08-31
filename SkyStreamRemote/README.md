@@ -42,7 +42,7 @@ web_server:
 
 TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button.
 
-The page sends one key, then waits 2 seconds on a visible countdown, then sends the next:
+The page sends one key, waits until the ESP32 has accepted it, then waits 2 seconds, then sends the next. The 2s gap starts after the press, so OK cannot still be transmitting when Back is queued:
 
 `Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`
 

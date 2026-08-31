@@ -285,6 +285,14 @@
     return fetch("/button/" + id + "/press", { method: "POST", cache: "no-store" });
   }
 
+  // Wait until the ESP32 has taken the press (or 4s, so a hung HTTP cannot stall the sequence).
+  // The 2s TV Guide gap starts after this, otherwise Back can sit in the ESP32 queue and fire
+  // the instant OK IR finishes — which feels like no gap.
+  async function fireCommand(id, element = null) {
+    const request = postCommand(id, element).catch(() => {});
+    await Promise.race([request, sleep(4000)]);
+  }
+
   async function press(id, element = null) {
     if (sequenceBusy) {
       return;
@@ -316,7 +324,7 @@
       for (let index = 0; index < TV_GUIDE_STEPS.length; index++) {
         const id = TV_GUIDE_STEPS[index];
         setStatus("TV Guide " + (index + 1) + "/" + TV_GUIDE_STEPS.length + ": " + prettyLabel(id), "", 0);
-        postCommand(id).catch(() => {});
+        await fireCommand(id);
         if (index < TV_GUIDE_STEPS.length - 1) {
           setStatus("wait 2s then " + prettyLabel(TV_GUIDE_STEPS[index + 1]), "", 0);
           await sleep(COMMAND_DELAY_MS);
