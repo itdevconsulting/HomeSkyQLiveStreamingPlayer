@@ -6,7 +6,7 @@ The HTTP Sky Stream remote in this repo talks to TCP 8091. That path cannot wake
 
 ## Files
 
-- `sky_remote.js` — remote UI, styles, key clicks, keyboard, and TV Guide.
+- `sky_remote.js` — remote UI, styles, key clicks, keyboard, TV Guide, and Live TV channel picker.
 - `sky_remote.loader.js` / `sky_remote.boot.js` — what ESPHome’s `js_url` loads; they then fetch `sky_remote.js` from GitHub. Use `boot.js` in firmware so jsDelivr cannot keep an old cached loader.
 - `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant.
 - `SkyStreamRemote.csproj` — Rider project so these assets sit in the same solution as the player.
@@ -47,3 +47,7 @@ The page sends one key, then waits 2 seconds on a visible countdown, then sends 
 `Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`
 
 The footer must read `2s gap after every key`. If it does not, the browser still has an old script.
+
+## Live TV
+
+The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs the existing TV Guide sequence, waits 2 seconds after the last Guide key (that wait is in the Live TV path, not inside TV Guide), types the channel digits with 250 ms between numbers, then OK, OK.
