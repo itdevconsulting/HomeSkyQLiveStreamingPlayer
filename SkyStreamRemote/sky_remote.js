@@ -7,7 +7,7 @@
   const AFTER_OK_MS = 3000;
   const AFTER_BACK_MS = 1000;
   const AFTER_LAST_DOWN_MS = 2000;
-  const DIGIT_DELAY_MS = 500;
+  const DIGIT_DELAY_MS = 1000;
 
   function key(id, label) {
     return { type: "press", id, label };
@@ -19,17 +19,17 @@
 
   const TV_GUIDE_STEPS = [
     key("sky_stream_home"),
-    wait(HOME_SETTLE_MS),
+    wait(6000),
     key("sky_stream_down"),
-    wait(QUICK_MS),
+    wait(1000),
     key("sky_stream_down"),
-    wait(AFTER_MENU_DOWN_MS),
+    wait(1000),
     key("sky_stream_ok"),
-    wait(AFTER_OK_MS),
+    wait(4000),
     key("sky_stream_back"),
-    wait(AFTER_BACK_MS),
+    wait(3000),
     key("sky_stream_down"),
-    wait(AFTER_LAST_DOWN_MS)
+    wait(4000)
   ];
   const TV_GUIDE_FOOTER = "Locked during sequences";
   const CHANNELS = [

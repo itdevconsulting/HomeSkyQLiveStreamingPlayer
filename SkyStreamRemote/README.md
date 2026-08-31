@@ -44,13 +44,13 @@ TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. Ther
 
 The remote locks until the sequence finishes. Each item is either a press or a wait — the delay is its own step, not attached to the IR button:
 
-`Home → wait 5 s → Down → wait 0.5 s → Down → wait 3 s → OK → wait 3 s → Back → wait 1 s → Down → wait 2 s`
+`Home → wait 6 s → Down → wait 1 s → Down → wait 1 s → OK → wait 4 s → Back → wait 3 s → Down → wait 4 s`
 
 The footer must read `Locked during sequences`. If it does not, the browser still has an old script.
 
 ## Live TV
 
-The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that Guide sequence, then the digits at 500 ms, then OK, 3 s, OK.
+The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that Guide sequence, then the digits at 1 s, then OK, 3 s, OK.
 
 ## IR transmitter (ESPHome)
 
