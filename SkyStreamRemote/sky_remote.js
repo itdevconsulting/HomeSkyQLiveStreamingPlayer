@@ -19,15 +19,15 @@
 
   const TV_GUIDE_STEPS = [
     key("sky_stream_home"),
-    wait(6000),
-    key("sky_stream_down"),
-    wait(1000),
-    key("sky_stream_down"),
-    wait(4000),
-    key("sky_stream_ok"),
-    wait(1000),
-    key("sky_stream_back"),
     wait(5000),
+    key("sky_stream_down"),
+    wait(3000),
+    key("sky_stream_down"),
+    wait(2000),
+    key("sky_stream_ok"),
+    wait(2000),
+    key("sky_stream_back"),
+    wait(1000),
     key("sky_stream_down"),
     wait(5000)
   ];
