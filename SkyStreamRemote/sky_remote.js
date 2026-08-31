@@ -3,15 +3,18 @@
 
   const HOME_SETTLE_MS = 5000;
   const QUICK_MS = 500;
-  const SLOW_SETTLE_MS = 4000;
+  const AFTER_MENU_DOWN_MS = 3000;
+  const AFTER_OK_MS = 3000;
+  const AFTER_BACK_MS = 1000;
+  const AFTER_LAST_DOWN_MS = 2000;
   const DIGIT_DELAY_MS = 500;
   const TV_GUIDE_STEPS = [
     { id: "sky_stream_home", gapMs: HOME_SETTLE_MS },
     { id: "sky_stream_down", gapMs: QUICK_MS },
-    { id: "sky_stream_down", gapMs: QUICK_MS },
-    { id: "sky_stream_ok", gapMs: SLOW_SETTLE_MS },
-    { id: "sky_stream_back", gapMs: SLOW_SETTLE_MS },
-    { id: "sky_stream_down", gapMs: SLOW_SETTLE_MS }
+    { id: "sky_stream_down", gapMs: AFTER_MENU_DOWN_MS },
+    { id: "sky_stream_ok", gapMs: AFTER_OK_MS },
+    { id: "sky_stream_back", gapMs: AFTER_BACK_MS },
+    { id: "sky_stream_down", gapMs: AFTER_LAST_DOWN_MS }
   ];
   const TV_GUIDE_FOOTER = "Locked during sequences";
   const CHANNELS = [
@@ -601,8 +604,8 @@
     [...digits].forEach(digit => {
       steps.push({ id: "sky_stream_" + digit, gapMs: DIGIT_DELAY_MS });
     });
-    steps.push({ id: "sky_stream_ok", gapMs: SLOW_SETTLE_MS, label: "ok 1" });
-    steps.push({ id: "sky_stream_ok", gapMs: SLOW_SETTLE_MS, label: "ok 2" });
+    steps.push({ id: "sky_stream_ok", gapMs: AFTER_OK_MS, label: "ok 1" });
+    steps.push({ id: "sky_stream_ok", gapMs: AFTER_OK_MS, label: "ok 2" });
 
     await runSequence(steps, "Live TV " + digits);
 
