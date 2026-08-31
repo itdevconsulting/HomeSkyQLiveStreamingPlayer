@@ -239,15 +239,13 @@ function createLivePlaybackController(video, options) {
         : () => video.play();
     const retryDelays = options?.retryDelaysMs || [0, 120, 350, 800, 1600, 2800, 4500];
     let stopped = false;
+    let started = false;
     const timers = [];
     let unmuteHook = null;
 
     const onCanPlay = () => tryPlay("canplay");
     const onLoadedData = () => tryPlay("loadeddata");
-    const onPlaying = () => {
-        onStatus?.("Playing");
-        tryUnmute();
-    };
+    const onPlaying = () => markStarted();
 
     function prepare() {
         video.playsInline = true;
@@ -259,11 +257,43 @@ function createLivePlaybackController(video, options) {
         video.setAttribute("muted", "");
     }
 
-    function armUnmuteOnGesture() {
-        if (stopped || unmuteHook) {
+    function clearStartRetries() {
+        timers.splice(0).forEach((timer) => window.clearTimeout(timer));
+        video.removeEventListener("canplay", onCanPlay);
+        video.removeEventListener("loadeddata", onLoadedData);
+    }
+
+    function dismissNativeSpinner() {
+        if (stopped || !video.controls) {
             return;
         }
 
+        video.controls = false;
+        window.requestAnimationFrame(() => {
+            if (!stopped) {
+                video.controls = true;
+            }
+        });
+    }
+
+    function markStarted() {
+        if (stopped || started) {
+            return;
+        }
+
+        started = true;
+        onStatus?.("Playing");
+        clearStartRetries();
+        dismissNativeSpinner();
+        armUnmuteOnGesture();
+    }
+
+    function armUnmuteOnGesture() {
+        if (stopped || unmuteHook || !video.muted) {
+            return;
+        }
+
+        onLog?.("Playing muted; click once for sound.");
         unmuteHook = () => {
             if (stopped) {
                 return;
@@ -272,36 +302,11 @@ function createLivePlaybackController(video, options) {
             video.muted = false;
             video.defaultMuted = false;
             video.removeAttribute("muted");
-            tryPlay("gesture-unmute");
+            video.play().catch(() => null);
         };
 
         window.addEventListener("pointerdown", unmuteHook, { once: true, capture: true });
         window.addEventListener("keydown", unmuteHook, { once: true, capture: true });
-    }
-
-    function tryUnmute() {
-        if (stopped || video.paused || !video.muted) {
-            return;
-        }
-
-        video.muted = false;
-        video.defaultMuted = false;
-        video.removeAttribute("muted");
-        const playPromise = video.play();
-        if (playPromise && typeof playPromise.catch === "function") {
-            playPromise.catch(() => {
-                if (stopped) {
-                    return;
-                }
-
-                video.muted = true;
-                video.defaultMuted = true;
-                video.setAttribute("muted", "");
-                onLog?.("Browser blocked unmuted autoplay; sound starts on the next click.");
-                armUnmuteOnGesture();
-                video.play().catch(() => null);
-            });
-        }
     }
 
     async function tryPlay(reason) {
@@ -310,36 +315,21 @@ function createLivePlaybackController(video, options) {
         }
 
         if (!video.paused) {
-            tryUnmute();
+            markStarted();
             return true;
         }
 
-        if (reason === "media-info" || reason === "manifest-parsed" || reason === "videojs-ready" || reason === "gesture-unmute") {
+        if (reason === "media-info" || reason === "manifest-parsed" || reason === "videojs-ready") {
             onLog?.(`Starting playback (${reason})`);
         }
 
         try {
             await playMedia();
             if (!video.paused) {
-                tryUnmute();
+                markStarted();
                 return true;
             }
         } catch (error) {
-            if (!video.muted) {
-                video.muted = true;
-                video.defaultMuted = true;
-                video.setAttribute("muted", "");
-                try {
-                    await playMedia();
-                    onLog?.("Playing muted until a click unmutes");
-                    armUnmuteOnGesture();
-                    return !video.paused;
-                } catch (mutedError) {
-                    onLog?.(mutedError?.message || error?.message || "Unable to play stream");
-                    return false;
-                }
-            }
-
             onLog?.(error?.message || "Unable to play stream");
         }
 
@@ -358,9 +348,7 @@ function createLivePlaybackController(video, options) {
         tryPlay,
         stop() {
             stopped = true;
-            timers.splice(0).forEach((timer) => window.clearTimeout(timer));
-            video.removeEventListener("canplay", onCanPlay);
-            video.removeEventListener("loadeddata", onLoadedData);
+            clearStartRetries();
             video.removeEventListener("playing", onPlaying);
             if (unmuteHook) {
                 window.removeEventListener("pointerdown", unmuteHook, true);
