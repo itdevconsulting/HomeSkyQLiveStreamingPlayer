@@ -299,6 +299,7 @@
   border-radius: inherit;
   background: linear-gradient(90deg, #39e56d, #178cff);
   box-shadow: 0 0 12px rgba(57,229,109,.4);
+  transition: none;
 }
 .sequence-caption {
   margin-top: 8px;
@@ -422,18 +423,36 @@
     }
   }
 
-  async function countdownBar(ms) {
-    const { bar } = sequenceEls();
-    if (!bar) {
-      await sleep(ms);
-      return;
+  async function countdownBar(ms, currentId, nextId) {
+    const { bar, caption: captionEl } = sequenceEls();
+    const started = performance.now();
+
+    if (bar) {
+      bar.style.transition = "none";
+      bar.style.transform = "scaleX(1)";
     }
-    resetCountdownBar();
-    void bar.offsetWidth;
-    bar.style.transition = "transform " + ms + "ms linear";
-    bar.style.transform = "scaleX(0)";
-    await sleep(ms);
-    resetCountdownBar();
+
+    while (true) {
+      const elapsed = performance.now() - started;
+      const remainingMs = Math.max(0, ms - elapsed);
+      if (bar) {
+        bar.style.transform = "scaleX(" + (ms > 0 ? remainingMs / ms : 0) + ")";
+      }
+
+      const caption = nextId
+        ? "After " + prettyLabel(currentId) + " · " + (remainingMs / 1000).toFixed(1) + "s then " + prettyLabel(nextId)
+        : "After " + prettyLabel(currentId) + " · " + (remainingMs / 1000).toFixed(1) + "s";
+      if (captionEl) {
+        captionEl.textContent = caption;
+      }
+      setStatus(caption, "", 0);
+
+      if (elapsed >= ms) {
+        break;
+      }
+
+      await sleep(Math.min(40, Math.max(remainingMs, 1)));
+    }
   }
 
   async function sendAndWait(id) {
@@ -445,6 +464,7 @@
       if (!response.ok) {
         throw new Error(prettyLabel(id) + " HTTP " + response.status);
       }
+      await response.text();
     } catch (error) {
       if (error && error.name === "AbortError") {
         throw new Error(prettyLabel(id) + " timed out");
@@ -469,12 +489,8 @@
         setStatus("Sending " + prettyLabel(id), "", 0);
         await sendAndWait(id);
         if (gapMs > 0) {
-          const caption = nextId
-            ? prettyLabel(id) + "  →  " + prettyLabel(nextId)
-            : "Wait";
-          showSequenceHud(id, nextId, caption);
-          setStatus(caption, "", 0);
-          await countdownBar(gapMs);
+          showSequenceHud(id, nextId, "After " + prettyLabel(id));
+          await countdownBar(gapMs, id, nextId);
         }
       }
       setStatus(doneMessage, "ok");
@@ -508,9 +524,9 @@
 
   function tvGuide() {
     return runSequence(
-      TV_GUIDE_STEPS.map((id, index) => ({
+      TV_GUIDE_STEPS.map(id => ({
         id,
-        gapMs: index < TV_GUIDE_STEPS.length - 1 ? COMMAND_DELAY_MS : 0
+        gapMs: COMMAND_DELAY_MS
       })),
       "TV Guide"
     );
@@ -581,7 +597,7 @@
       steps.push({ id: "sky_stream_" + digit, gapMs: DIGIT_DELAY_MS });
     });
     steps.push({ id: "sky_stream_ok", gapMs: DIGIT_DELAY_MS });
-    steps.push({ id: "sky_stream_ok", gapMs: 0 });
+    steps.push({ id: "sky_stream_ok", gapMs: DIGIT_DELAY_MS });
 
     await runSequence(steps, "Live TV " + digits);
 

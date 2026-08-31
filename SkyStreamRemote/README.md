@@ -42,7 +42,7 @@ web_server:
 
 TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button.
 
-The remote locks until the sequence finishes: send a key, wait for the ESP32 to accept it, show Now / Next and a countdown bar, then send the next key. Clicks and keyboard are ignored while it runs.
+The remote locks until the sequence finishes: send a key, wait until that HTTP press has fully finished, then count down 3 s after that key before the next one. The caption shows `After home · 3.0s then down` so the wait is visibly after the command, not before it.
 
 `Home → 3 s → Down → 3 s → Down → 3 s → OK → 3 s → Back → 3 s → Down`
 
