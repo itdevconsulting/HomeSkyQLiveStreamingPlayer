@@ -2,7 +2,7 @@
   "use strict";
 
   const JS_URL =
-    "https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/SkyStreamRemote/sky_remote.js?v=guide-after-ok&t=" +
+    "https://raw.githubusercontent.com/itdevconsulting/HomeSkyQLiveStreamingPlayer/main/SkyStreamRemote/sky_remote.js?v=seq-lock-bar&t=" +
     Date.now();
 
   function showError(message) {

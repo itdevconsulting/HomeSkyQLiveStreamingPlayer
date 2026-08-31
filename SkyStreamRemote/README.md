@@ -42,12 +42,12 @@ web_server:
 
 TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button.
 
-The page sends one key, waits until the ESP32 has accepted it, then waits 2 seconds, then sends the next. The 2s gap starts after the press, so OK cannot still be transmitting when Back is queued:
+The remote locks until the sequence finishes: send a key, wait for the ESP32 to accept it, show Now / Next and a countdown bar, then send the next key. Clicks and keyboard are ignored while it runs.
 
 `Home → 2 s → Down → 2 s → Down → 2 s → OK → 2 s → Back → 2 s → Down`
 
-The footer must read `2s gap after every key`. If it does not, the browser still has an old script.
+The footer must read `Locked during sequences`. If it does not, the browser still has an old script.
 
 ## Live TV
 
-The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs the existing TV Guide sequence, waits 2 seconds after the last Guide key (that wait is in the Live TV path, not inside TV Guide), types the channel digits with 250 ms between numbers, then OK, OK.
+The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that same locked sequence, then a 2 s bar, then the channel digits with 250 ms bars, then OK, OK.

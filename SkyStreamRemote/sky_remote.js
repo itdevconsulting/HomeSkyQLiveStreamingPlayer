@@ -10,7 +10,7 @@
     "sky_stream_back",
     "sky_stream_down"
   ];
-  const TV_GUIDE_FOOTER = "2s gap after every key";
+  const TV_GUIDE_FOOTER = "Locked during sequences";
   const DIGIT_DELAY_MS = 250;
   const CHANNELS = [
     [101, "BBC One", "Entertainment"],
@@ -247,6 +247,81 @@
   background: #161b20;
   color: var(--text);
 }
+.sequence-hud {
+  margin: 0 0 16px;
+  padding: 12px 12px 11px;
+  border: 2px solid #050708;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(57,229,109,.08), transparent 42%),
+    linear-gradient(180deg, #1c2833, #12181d);
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,.08),
+    0 6px 14px rgba(0,0,0,.28);
+}
+.sequence-labels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.sequence-kicker {
+  display: block;
+  font-size: 9px;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.sequence-labels strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  text-transform: capitalize;
+  line-height: 1.15;
+}
+#sequence-now { color: var(--green); }
+#sequence-next { color: #9be7ff; }
+.sequence-track {
+  height: 9px;
+  border-radius: 99px;
+  background: #0b1014;
+  border: 1px solid #050708;
+  overflow: hidden;
+}
+.sequence-bar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(1);
+  transform-origin: left center;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #39e56d, #178cff);
+  box-shadow: 0 0 12px rgba(57,229,109,.4);
+}
+.sequence-caption {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+}
+.remote-shell.is-locked {
+  cursor: wait;
+}
+.remote-shell.is-locked .device-led {
+  background: var(--yellow);
+  box-shadow: 0 0 8px rgba(255,209,47,.7);
+}
+.remote-shell.is-locked button,
+.remote-shell.is-locked input,
+.remote-shell.is-locked select {
+  pointer-events: none !important;
+  opacity: .42;
+}
+.remote-shell.is-locked button.active {
+  opacity: 1;
+}
 `;
     document.head.appendChild(style);
   }
@@ -276,21 +351,139 @@
     return new Promise(resolve => window.setTimeout(resolve, ms));
   }
 
-  function postCommand(id, element = null) {
+  function postCommand(id, element = null, signal = undefined) {
     if (element) {
       element.classList.add("active");
       setTimeout(() => element.classList.remove("active"), 110);
     }
 
-    return fetch("/button/" + id + "/press", { method: "POST", cache: "no-store" });
+    return fetch("/button/" + id + "/press", { method: "POST", cache: "no-store", signal });
   }
 
-  // Wait until the ESP32 has taken the press (or 4s, so a hung HTTP cannot stall the sequence).
-  // The 2s TV Guide gap starts after this, otherwise Back can sit in the ESP32 queue and fire
-  // the instant OK IR finishes — which feels like no gap.
-  async function fireCommand(id, element = null) {
-    const request = postCommand(id, element).catch(() => {});
-    await Promise.race([request, sleep(4000)]);
+  function sequenceEls() {
+    return {
+      hud: document.getElementById("sequence-hud"),
+      now: document.getElementById("sequence-now"),
+      next: document.getElementById("sequence-next"),
+      nextWrap: document.getElementById("sequence-next-wrap"),
+      bar: document.getElementById("sequence-bar"),
+      caption: document.getElementById("sequence-caption"),
+      shell: document.querySelector(".remote-shell")
+    };
+  }
+
+  function resetCountdownBar() {
+    const { bar } = sequenceEls();
+    if (!bar) {
+      return;
+    }
+    bar.style.transition = "none";
+    bar.style.transform = "scaleX(1)";
+  }
+
+  function showSequenceHud(currentId, nextId, caption) {
+    const { hud, now, next, nextWrap, caption: captionEl } = sequenceEls();
+    if (!hud) {
+      return;
+    }
+    hud.hidden = false;
+    now.textContent = prettyLabel(currentId);
+    if (nextId) {
+      nextWrap.hidden = false;
+      next.textContent = prettyLabel(nextId);
+    } else {
+      nextWrap.hidden = true;
+      next.textContent = "";
+    }
+    captionEl.textContent = caption;
+  }
+
+  function hideSequenceHud() {
+    const { hud } = sequenceEls();
+    if (hud) {
+      hud.hidden = true;
+    }
+    resetCountdownBar();
+  }
+
+  function setUiLocked(locked) {
+    sequenceBusy = locked;
+    const { shell } = sequenceEls();
+    if (shell) {
+      shell.classList.toggle("is-locked", locked);
+      shell.setAttribute("aria-busy", locked ? "true" : "false");
+    }
+    setLiveTvDisabled(locked);
+    if (locked && document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
+    if (!locked) {
+      hideSequenceHud();
+    }
+  }
+
+  async function countdownBar(ms) {
+    const { bar } = sequenceEls();
+    if (!bar) {
+      await sleep(ms);
+      return;
+    }
+    resetCountdownBar();
+    void bar.offsetWidth;
+    bar.style.transition = "transform " + ms + "ms linear";
+    bar.style.transform = "scaleX(0)";
+    await sleep(ms);
+    resetCountdownBar();
+  }
+
+  async function sendAndWait(id) {
+    const element = document.querySelector(`[data-command="${id}"]`);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await postCommand(id, element, controller.signal);
+      if (!response.ok) {
+        throw new Error(prettyLabel(id) + " HTTP " + response.status);
+      }
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        throw new Error(prettyLabel(id) + " timed out");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  async function runSequence(steps, doneMessage) {
+    if (sequenceBusy) {
+      return;
+    }
+
+    setUiLocked(true);
+    try {
+      for (let index = 0; index < steps.length; index++) {
+        const { id, gapMs } = steps[index];
+        const nextId = steps[index + 1] ? steps[index + 1].id : "";
+        showSequenceHud(id, nextId, "Sending " + prettyLabel(id));
+        setStatus("Sending " + prettyLabel(id), "", 0);
+        await sendAndWait(id);
+        if (gapMs > 0) {
+          const caption = nextId
+            ? prettyLabel(id) + "  →  " + prettyLabel(nextId)
+            : "Wait";
+          showSequenceHud(id, nextId, caption);
+          setStatus(caption, "", 0);
+          await countdownBar(gapMs);
+        }
+      }
+      setStatus(doneMessage, "ok");
+    } catch (error) {
+      console.error("Sequence failed:", error);
+      setStatus("Failed: " + (error && error.message ? error.message : error), "error", 8000);
+    } finally {
+      setUiLocked(false);
+    }
   }
 
   async function press(id, element = null) {
@@ -298,6 +491,7 @@
       return;
     }
 
+    sequenceBusy = true;
     try {
       const response = await postCommand(id, element);
       if (!response.ok) {
@@ -307,39 +501,19 @@
     } catch (error) {
       console.error("Sky Stream command failed:", error);
       setStatus("Failed: " + (error && error.message ? error.message : id), "error", 5000);
+    } finally {
+      sequenceBusy = false;
     }
   }
 
-  async function tvGuide(element = null) {
-    if (sequenceBusy) {
-      return;
-    }
-
-    sequenceBusy = true;
-    if (element) {
-      element.classList.add("active");
-    }
-
-    try {
-      for (let index = 0; index < TV_GUIDE_STEPS.length; index++) {
-        const id = TV_GUIDE_STEPS[index];
-        setStatus("TV Guide " + (index + 1) + "/" + TV_GUIDE_STEPS.length + ": " + prettyLabel(id), "", 0);
-        await fireCommand(id);
-        if (index < TV_GUIDE_STEPS.length - 1) {
-          setStatus("wait 2s then " + prettyLabel(TV_GUIDE_STEPS[index + 1]), "", 0);
-          await sleep(COMMAND_DELAY_MS);
-        }
-      }
-      setStatus("TV Guide", "ok");
-    } catch (error) {
-      console.error("TV Guide sequence failed:", error);
-      setStatus("Failed: TV Guide: " + (error && error.message ? error.message : error), "error", 8000);
-    } finally {
-      sequenceBusy = false;
-      if (element) {
-        element.classList.remove("active");
-      }
-    }
+  function tvGuide() {
+    return runSequence(
+      TV_GUIDE_STEPS.map((id, index) => ({
+        id,
+        gapMs: index < TV_GUIDE_STEPS.length - 1 ? COMMAND_DELAY_MS : 0
+      })),
+      "TV Guide"
+    );
   }
 
   function setLiveTvDisabled(disabled) {
@@ -402,42 +576,18 @@
       return;
     }
 
-    setLiveTvDisabled(true);
-    try {
-      await tvGuide();
+    const steps = TV_GUIDE_STEPS.map(id => ({ id, gapMs: COMMAND_DELAY_MS }));
+    [...digits].forEach(digit => {
+      steps.push({ id: "sky_stream_" + digit, gapMs: DIGIT_DELAY_MS });
+    });
+    steps.push({ id: "sky_stream_ok", gapMs: DIGIT_DELAY_MS });
+    steps.push({ id: "sky_stream_ok", gapMs: 0 });
 
-      sequenceBusy = true;
-      try {
-        setStatus("wait 2s then " + digits[0], "", 0);
-        await sleep(COMMAND_DELAY_MS);
+    await runSequence(steps, "Live TV " + digits);
 
-        for (let index = 0; index < digits.length; index++) {
-          const id = "sky_stream_" + digits[index];
-          const element = document.querySelector(`[data-command="${id}"]`);
-          setStatus("Live TV " + digits.slice(0, index + 1), "", 0);
-          postCommand(id, element).catch(() => {});
-          if (index < digits.length - 1) {
-            await sleep(DIGIT_DELAY_MS);
-          }
-        }
-
-        await sleep(DIGIT_DELAY_MS);
-        postCommand("sky_stream_ok", document.querySelector('[data-command="sky_stream_ok"]')).catch(() => {});
-        await sleep(DIGIT_DELAY_MS);
-        postCommand("sky_stream_ok", document.querySelector('[data-command="sky_stream_ok"]')).catch(() => {});
-        setStatus("Live TV " + digits, "ok");
-      } finally {
-        sequenceBusy = false;
-      }
-    } catch (error) {
-      console.error("Live TV tune failed:", error);
-      setStatus("Failed: Live TV " + digits, "error", 8000);
-    } finally {
-      setLiveTvDisabled(false);
-      const select = document.getElementById("live-tv-select");
-      if (select) {
-        select.value = "";
-      }
+    const select = document.getElementById("live-tv-select");
+    if (select) {
+      select.value = "";
     }
   }
 
@@ -465,6 +615,23 @@
           <div class="device-head">
             <i class="device-led"></i>
             <span class="device-host">${location.hostname}</span>
+          </div>
+
+          <div id="sequence-hud" class="sequence-hud" hidden>
+            <div class="sequence-labels">
+              <div>
+                <span class="sequence-kicker">Now</span>
+                <strong id="sequence-now"></strong>
+              </div>
+              <div id="sequence-next-wrap">
+                <span class="sequence-kicker">Next</span>
+                <strong id="sequence-next"></strong>
+              </div>
+            </div>
+            <div class="sequence-track" aria-hidden="true">
+              <i id="sequence-bar" class="sequence-bar"></i>
+            </div>
+            <div id="sequence-caption" class="sequence-caption"></div>
           </div>
 
           <div class="remote-row three">
@@ -555,9 +722,17 @@
       });
     });
 
+    document.querySelector(".remote-shell").addEventListener("click", event => {
+      if (!sequenceBusy) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+
     document.getElementById("tv-guide").addEventListener("click", event => {
       event.preventDefault();
-      tvGuide(event.currentTarget);
+      tvGuide();
     });
 
     const liveTvSearch = document.getElementById("live-tv-search");
@@ -607,7 +782,16 @@
     };
 
     document.addEventListener("keydown", event => {
-      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) {
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      if (sequenceBusy) {
+        event.preventDefault();
+        return;
+      }
+
+      if (event.repeat) {
         return;
       }
 
