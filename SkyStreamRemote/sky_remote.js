@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const COMMAND_DELAY_MS = 2000;
+  const COMMAND_DELAY_MS = 3000;
   const TV_GUIDE_STEPS = [
     "sky_stream_home",
     "sky_stream_down",
@@ -11,7 +11,7 @@
     "sky_stream_down"
   ];
   const TV_GUIDE_FOOTER = "Locked during sequences";
-  const DIGIT_DELAY_MS = 250;
+  const DIGIT_DELAY_MS = 500;
   const CHANNELS = [
     [101, "BBC One", "Entertainment"],
     [102, "BBC Two", "Entertainment"],
