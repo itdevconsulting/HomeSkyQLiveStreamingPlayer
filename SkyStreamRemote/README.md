@@ -51,3 +51,7 @@ The footer must read `Locked during sequences`. If it does not, the browser stil
 ## Live TV
 
 The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that same locked sequence, then a 3 s bar, then the channel digits with 500 ms bars, then OK, OK.
+
+## IR transmitter (ESPHome)
+
+Pinout for the ESP32E-N4 is GPIO21 power (always on), GPIO4 TX, GPIO14 RX inverted, 50% carrier. YAML changes only take effect after you paste them into Home Assistant and install/flash the device. A browser refresh is not enough.

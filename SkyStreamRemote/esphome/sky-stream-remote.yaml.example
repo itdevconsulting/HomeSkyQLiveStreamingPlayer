@@ -55,22 +55,29 @@ switch:
     restore_mode: ALWAYS_ON
     entity_category: diagnostic
 
-# Onboard IR transmitter
+# Onboard IR transmitter.
+# GPIO4 and 50% carrier are correct for the ESP32E-N4 IR LED.
+# non_blocking: false so /button/*/press does not return until the IR burst
+# has actually been sent (ESPHome defaults this to true).
+# rmt_symbols is a multiple of the ESP32 block size (64). Longest Pronto here
+# is 72 timings; 128 is enough. Do not give TX and RX 256 each — they share
+# 512 symbols of RMT RAM on classic ESP32.
 remote_transmitter:
   id: ir_tx
   pin: GPIO4
   carrier_duty_percent: 50%
-  rmt_symbols: 256
+  clock_resolution: 1000000
+  rmt_symbols: 128
+  non_blocking: false
 
-# Onboard IR receiver.
-# Useful for learning/testing other remote commands.
+# Onboard IR receiver (learning only). dump: all logs the board's own TX and
+# fights the transmitter for RMT RAM — leave it off unless you are capturing codes.
 remote_receiver:
   id: ir_rx
   pin:
     number: GPIO14
     inverted: true
-  dump: all
-  rmt_symbols: 256
+  rmt_symbols: 64
 
 button:
   - platform: template
