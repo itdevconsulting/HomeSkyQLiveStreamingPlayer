@@ -44,7 +44,7 @@ TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. Ther
 
 The remote locks until the sequence finishes. Each item is either a press or a wait — the delay is its own step, not attached to the IR button:
 
-`Home → wait 6 s → Down → wait 1 s → Down → wait 1 s → OK → wait 4 s → Back → wait 3 s → Down → wait 4 s`
+`Home → wait 6 s → Down → wait 1 s → Down → wait 4 s → OK → wait 1 s → Back → wait 5 s → Down → wait 5 s`
 
 The footer must read `Locked during sequences`. If it does not, the browser still has an old script.
 

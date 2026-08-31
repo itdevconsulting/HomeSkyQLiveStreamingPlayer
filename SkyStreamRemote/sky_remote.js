@@ -23,13 +23,13 @@
     key("sky_stream_down"),
     wait(1000),
     key("sky_stream_down"),
-    wait(1000),
-    key("sky_stream_ok"),
     wait(4000),
+    key("sky_stream_ok"),
+    wait(1000),
     key("sky_stream_back"),
-    wait(3000),
+    wait(5000),
     key("sky_stream_down"),
-    wait(4000)
+    wait(5000)
   ];
   const TV_GUIDE_FOOTER = "Locked during sequences";
   const CHANNELS = [
