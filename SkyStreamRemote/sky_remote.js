@@ -76,15 +76,6 @@
     }
   }
 
-  async function sleepWithCountdown(ms, message) {
-    const endsAt = Date.now() + ms;
-    while (Date.now() < endsAt) {
-      const left = Math.max(1, Math.ceil((endsAt - Date.now()) / 1000));
-      setStatus(message + " " + left + "s", "", 0);
-      await sleep(Math.max(0, Math.min(250, endsAt - Date.now())));
-    }
-  }
-
   async function tvGuide(element = null) {
     if (sequenceBusy) {
       return;
@@ -101,7 +92,8 @@
         setStatus("TV Guide " + (index + 1) + "/" + TV_GUIDE_STEPS.length + ": " + prettyLabel(id), "", 0);
         postCommand(id).catch(() => {});
         if (index < TV_GUIDE_STEPS.length - 1) {
-          await sleepWithCountdown(COMMAND_DELAY_MS, "wait then " + prettyLabel(TV_GUIDE_STEPS[index + 1]));
+          setStatus("wait 2s then " + prettyLabel(TV_GUIDE_STEPS[index + 1]), "", 0);
+          await sleep(COMMAND_DELAY_MS);
         }
       }
       setStatus("TV Guide", "ok");
