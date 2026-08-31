@@ -420,6 +420,45 @@
   width: 226px;
   margin: 0 auto 14px;
 }
+.back-icon {
+  display: inline-block;
+  transform: rotate(-90deg);
+}
+.mute-css {
+  position: relative;
+  width: 22px;
+  height: 16px;
+}
+.mute-css .mute-body {
+  position: absolute;
+  left: 1px;
+  top: 4px;
+  width: 6px;
+  height: 8px;
+  background: currentColor;
+  border-radius: 1px 0 0 1px;
+}
+.mute-css .mute-cone {
+  position: absolute;
+  left: 6px;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 8px 0 8px 10px;
+  border-color: transparent transparent transparent currentColor;
+}
+.mute-css .mute-slash {
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  width: 18px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: rotate(-38deg);
+  box-shadow: 0 0 0 1px #161b20;
+}
 .live-tv-label {
   text-align: center;
   font-size: 11px;
@@ -565,11 +604,18 @@
   color: var(--text);
 }
 .setup-panel {
-  margin-top: 14px;
-  padding: 12px;
+  flex: 0 0 260px;
+  width: 260px;
+  max-height: calc(100vh - 32px);
+  margin: 0;
+  padding: 14px 12px 16px;
+  overflow-y: auto;
   border: 2px solid #050708;
-  border-radius: 18px;
+  border-radius: 22px;
   background: linear-gradient(180deg, #1c2833, #12181d);
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,.08),
+    0 12px 28px rgba(0,0,0,.32);
 }
 .setup-hint {
   margin: 0 0 10px;
@@ -623,6 +669,9 @@
   justify-content: center;
   gap: 10px;
 }
+#sky-app.is-setup {
+  width: min(100%, 760px);
+}
 .remote-shell {
   width: 320px;
   max-width: 100%;
@@ -661,7 +710,10 @@
 #sky-app.is-locked {
   cursor: wait;
 }
-#sky-app.is-locked .macro-rail button {
+#sky-app.is-locked .macro-rail button,
+#sky-app.is-locked .setup-panel button,
+#sky-app.is-locked .setup-panel input,
+#sky-app.is-locked .setup-panel select {
   pointer-events: none !important;
   opacity: .42;
 }
@@ -732,10 +784,24 @@
   gap: 6px;
   margin-bottom: 7px;
 }
+@media (max-width: 760px) {
+  #sky-app.is-setup {
+    width: min(100%, 454px);
+    flex-wrap: wrap;
+  }
+  .setup-panel {
+    flex: 1 1 100%;
+    width: 100%;
+    max-height: none;
+    order: 3;
+  }
+}
 @media (max-width: 470px) {
-  #sky-app {
+  #sky-app,
+  #sky-app.is-setup {
     width: min(100%, 320px);
     flex-direction: column;
+    flex-wrap: nowrap;
     align-items: stretch;
   }
   .macro-rail {
@@ -748,6 +814,10 @@
   .macro-chip {
     flex: 1 1 96px;
     width: auto;
+  }
+  .setup-panel {
+    flex: 1 1 auto;
+    width: 100%;
   }
 }
 `;
@@ -1187,6 +1257,7 @@
       }
       const opening = panel.hidden;
       panel.hidden = !opening;
+      document.getElementById("sky-app").classList.toggle("is-setup", opening);
       toggle.setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening) {
         fillSetupForm(waits);
@@ -1390,14 +1461,19 @@
           </div>
 
           <div class="remote-row three" style="margin-top:14px">
-            ${btn("sky_stream_back", "↶", "remote-button round icon back-correct", "Back")}
+            ${btn("sky_stream_back", '<span class="back-icon">↶</span>', "remote-button round icon", "Back")}
             ${btn(
               "sky_stream_play_pause",
               '<span class="playpause-css"><i class="tri"></i><span class="bars"><i></i><i></i></span></span>',
               "remote-button round icon",
               "Play / Pause"
             )}
-            ${btn("sky_stream_mute", "🔇", "remote-button round icon", "Mute")}
+            ${btn(
+              "sky_stream_mute",
+              '<span class="mute-css" aria-hidden="true"><i class="mute-body"></i><i class="mute-cone"></i><i class="mute-slash"></i></span>',
+              "remote-button round icon",
+              "Mute"
+            )}
           </div>
 
           <div class="dpad" aria-label="Navigation">
@@ -1455,8 +1531,9 @@
 
           <div id="sky-status" class="status">Ready</div>
           <div class="footer">${TV_GUIDE_FOOTER}</div>
+        </section>
 
-          <div id="setup-panel" class="setup-panel" hidden>
+        <aside id="setup-panel" class="setup-panel" hidden aria-label="Setup">
             <p class="setup-hint">Seconds for this browser only. The ESP32 only sends IR.</p>
             ${WAIT_FIELDS.map(field => `
             <div class="setup-row">
@@ -1494,8 +1571,7 @@
             <div class="setup-actions">
               <button type="button" id="macro-save-btn">Save macro</button>
             </div>
-          </div>
-        </section>
+        </aside>
       </main>
     `;
 

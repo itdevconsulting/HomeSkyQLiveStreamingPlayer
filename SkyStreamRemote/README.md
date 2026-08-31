@@ -52,7 +52,7 @@ The footer must read `Locked during sequences`. If it does not, the browser stil
 
 ## Setup (delays)
 
-**Setup** on the remote edits those waits in seconds. They are stored in `localStorage` in that browser (Home Assistant companion, Opera, etc.). The ESP32 firmware is unchanged: one IR button per key, no sequences, no macros.
+**Setup** opens delays and the macro builder in a panel to the **right** of the remote. Saved macros stay on the **left**. The ESP32 firmware is unchanged: one IR button per key, no sequences, no macros.
 
 Save writes this browser’s overlay. Defaults restores the delay values above (macros are left alone). Clearing site data forgets them. A different phone or a different HA user profile has its own copy.
 
