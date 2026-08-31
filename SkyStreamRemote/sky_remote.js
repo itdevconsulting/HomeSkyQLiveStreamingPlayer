@@ -7,7 +7,7 @@
   const AFTER_OK_MS = 3000;
   const AFTER_BACK_MS = 1000;
   const AFTER_LAST_DOWN_MS = 2000;
-  const DIGIT_DELAY_MS = 1000;
+  const DIGIT_DELAY_MS = 600;
 
   function key(id, label) {
     return { type: "press", id, label };
@@ -630,10 +630,10 @@
       steps.push(key("sky_stream_" + digit));
       steps.push(wait(DIGIT_DELAY_MS));
     });
-    steps.push(key("sky_stream_ok", "ok 1"));
-    steps.push(wait(AFTER_OK_MS));
-    steps.push(key("sky_stream_ok", "ok 2"));
-    steps.push(wait(AFTER_OK_MS));
+    steps.push(wait(4000));
+    steps.push(key("sky_stream_ok", "ok"));
+    steps.push(wait(1000));
+    steps.push(key("sky_stream_ok", "ok"));
 
     await runSequence(steps, "Live TV " + digits);
 
