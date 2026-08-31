@@ -46,7 +46,7 @@ web_server:
 
 
 # ESP32E-N4 IR board hardware power.
-# This MUST remain on or the onboard IR TX/RX circuitry is unpowered.
+# This MUST remain on or the onboard IR transmitter is unpowered.
 switch:
   - platform: gpio
     pin: GPIO21
@@ -55,13 +55,12 @@ switch:
     restore_mode: ALWAYS_ON
     entity_category: diagnostic
 
-# Onboard IR transmitter.
+# Onboard IR transmitter (send only — no receiver).
 # GPIO4 and 50% carrier are correct for the ESP32E-N4 IR LED.
 # non_blocking: false so /button/*/press does not return until the IR burst
 # has actually been sent (ESPHome defaults this to true).
 # rmt_symbols is a multiple of the ESP32 block size (64). Longest Pronto here
-# is 72 timings; 128 is enough. Do not give TX and RX 256 each — they share
-# 512 symbols of RMT RAM on classic ESP32.
+# is 72 timings; 128 is enough.
 remote_transmitter:
   id: ir_tx
   pin: GPIO4
@@ -69,15 +68,6 @@ remote_transmitter:
   clock_resolution: 1000000
   rmt_symbols: 128
   non_blocking: false
-
-# Onboard IR receiver (learning only). dump: all logs the board's own TX and
-# fights the transmitter for RMT RAM — leave it off unless you are capturing codes.
-remote_receiver:
-  id: ir_rx
-  pin:
-    number: GPIO14
-    inverted: true
-  rmt_symbols: 64
 
 button:
   - platform: template

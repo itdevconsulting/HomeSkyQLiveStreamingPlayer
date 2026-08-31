@@ -54,4 +54,4 @@ The dropdown uses the same channel list as the Blazor Sky Stream picker (search 
 
 ## IR transmitter (ESPHome)
 
-Pinout for the ESP32E-N4 is GPIO21 power (always on), GPIO4 TX, GPIO14 RX inverted, 50% carrier. YAML changes only take effect after you paste them into Home Assistant and install/flash the device. A browser refresh is not enough.
+Pinout for the ESP32E-N4 is GPIO21 power (always on) and GPIO4 TX at 50% carrier. There is no IR receiver in this firmware. YAML changes only take effect after you paste them into Home Assistant and install/flash the device. A browser refresh is not enough.
