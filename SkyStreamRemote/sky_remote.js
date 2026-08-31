@@ -1,13 +1,29 @@
 (() => {
   "use strict";
 
-  const HOME_SETTLE_MS = 5000;
-  const QUICK_MS = 500;
-  const AFTER_MENU_DOWN_MS = 3000;
-  const AFTER_OK_MS = 3000;
-  const AFTER_BACK_MS = 1000;
-  const AFTER_LAST_DOWN_MS = 2000;
-  const DIGIT_DELAY_MS = 600;
+  const STORAGE_KEY = "sky-stream-remote-v1";
+  const DEFAULT_WAITS = {
+    afterHome: 5000,
+    afterFirstDown: 3000,
+    afterSecondDown: 2000,
+    afterOk: 2000,
+    afterBack: 1000,
+    afterLastDown: 5000,
+    betweenDigits: 600,
+    beforeTuneOk: 4000,
+    betweenTuneOks: 1000
+  };
+  const WAIT_FIELDS = [
+    { key: "afterHome", label: "After Home" },
+    { key: "afterFirstDown", label: "After first Down" },
+    { key: "afterSecondDown", label: "After second Down" },
+    { key: "afterOk", label: "After Guide OK" },
+    { key: "afterBack", label: "After Back" },
+    { key: "afterLastDown", label: "After last Down" },
+    { key: "betweenDigits", label: "Between digits" },
+    { key: "beforeTuneOk", label: "After number, before OK" },
+    { key: "betweenTuneOks", label: "Between Live TV OKs" }
+  ];
 
   function key(id, label) {
     return { type: "press", id, label };
@@ -17,20 +33,56 @@
     return { type: "delay", ms };
   }
 
-  const TV_GUIDE_STEPS = [
-    key("sky_stream_home"),
-    wait(5000),
-    key("sky_stream_down"),
-    wait(3000),
-    key("sky_stream_down"),
-    wait(2000),
-    key("sky_stream_ok"),
-    wait(2000),
-    key("sky_stream_back"),
-    wait(1000),
-    key("sky_stream_down"),
-    wait(5000)
-  ];
+  function clampWaitMs(value, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return fallback;
+    }
+    return Math.max(0, Math.min(30000, Math.round(number)));
+  }
+
+  function loadWaits() {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        return Object.assign({}, DEFAULT_WAITS);
+      }
+      const parsed = JSON.parse(raw);
+      const stored = parsed && parsed.waits ? parsed.waits : parsed;
+      const waits = Object.assign({}, DEFAULT_WAITS);
+      Object.keys(DEFAULT_WAITS).forEach(name => {
+        if (stored && stored[name] != null) {
+          waits[name] = clampWaitMs(stored[name], DEFAULT_WAITS[name]);
+        }
+      });
+      return waits;
+    } catch (error) {
+      return Object.assign({}, DEFAULT_WAITS);
+    }
+  }
+
+  function saveWaits(waits) {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, waits: waits }));
+  }
+
+  function guideSteps(waits) {
+    return [
+      key("sky_stream_home"),
+      wait(waits.afterHome),
+      key("sky_stream_down"),
+      wait(waits.afterFirstDown),
+      key("sky_stream_down"),
+      wait(waits.afterSecondDown),
+      key("sky_stream_ok"),
+      wait(waits.afterOk),
+      key("sky_stream_back"),
+      wait(waits.afterBack),
+      key("sky_stream_down"),
+      wait(waits.afterLastDown)
+    ];
+  }
+
+  let waits = loadWaits();
   const TV_GUIDE_FOOTER = "Locked during sequences";
   const CHANNELS = [
     [101, "BBC One", "Entertainment"],
@@ -343,6 +395,84 @@
 .remote-shell.is-locked button.active {
   opacity: 1;
 }
+.device-head {
+  justify-content: space-between;
+}
+.device-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.setup-toggle {
+  appearance: none;
+  border: 2px solid #050708;
+  border-radius: 12px;
+  background: linear-gradient(150deg, var(--button), var(--button-low));
+  color: var(--muted);
+  font: 750 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing: .3px;
+  padding: 7px 10px;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,.11),
+    0 4px 8px rgba(0,0,0,.38);
+}
+.setup-toggle[aria-expanded="true"] {
+  color: var(--text);
+}
+.setup-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 2px solid #050708;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #1c2833, #12181d);
+}
+.setup-hint {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
+}
+.setup-row {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.setup-row label {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+.setup-row input {
+  width: 100%;
+  border: 2px solid #050708;
+  border-radius: 10px;
+  background: #0b1014;
+  color: var(--text);
+  font: 700 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding: 7px 6px;
+  text-align: center;
+}
+.setup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.setup-actions button {
+  appearance: none;
+  height: 36px;
+  border: 2px solid #050708;
+  border-radius: 12px;
+  background: linear-gradient(150deg, var(--button), var(--button-low));
+  color: var(--text);
+  font: 750 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  cursor: pointer;
+}
 `;
     document.head.appendChild(style);
   }
@@ -562,7 +692,7 @@
   }
 
   function tvGuide() {
-    return runSequence(TV_GUIDE_STEPS, "TV Guide");
+    return runSequence(guideSteps(waits), "TV Guide");
   }
 
   function setLiveTvDisabled(disabled) {
@@ -625,14 +755,14 @@
       return;
     }
 
-    const steps = TV_GUIDE_STEPS.slice();
+    const steps = guideSteps(waits);
     [...digits].forEach(digit => {
       steps.push(key("sky_stream_" + digit));
-      steps.push(wait(DIGIT_DELAY_MS));
+      steps.push(wait(waits.betweenDigits));
     });
-    steps.push(wait(4000));
+    steps.push(wait(waits.beforeTuneOk));
     steps.push(key("sky_stream_ok", "ok"));
-    steps.push(wait(1000));
+    steps.push(wait(waits.betweenTuneOks));
     steps.push(key("sky_stream_ok", "ok"));
 
     await runSequence(steps, "Live TV " + digits);
@@ -644,6 +774,59 @@
   }
 
   
+  function fillSetupForm(current) {
+    WAIT_FIELDS.forEach(field => {
+      const input = document.getElementById("wait-" + field.key);
+      if (input) {
+        input.value = String(current[field.key] / 1000);
+      }
+    });
+  }
+
+  function readSetupForm() {
+    const next = Object.assign({}, DEFAULT_WAITS);
+    WAIT_FIELDS.forEach(field => {
+      const input = document.getElementById("wait-" + field.key);
+      if (!input) {
+        return;
+      }
+      next[field.key] = clampWaitMs(Number(input.value) * 1000, DEFAULT_WAITS[field.key]);
+    });
+    return next;
+  }
+
+  function bindSetup() {
+    const toggle = document.getElementById("setup-toggle");
+    const panel = document.getElementById("setup-panel");
+    fillSetupForm(waits);
+
+    toggle.addEventListener("click", () => {
+      if (sequenceBusy) {
+        return;
+      }
+      const opening = panel.hidden;
+      panel.hidden = !opening;
+      toggle.setAttribute("aria-expanded", opening ? "true" : "false");
+      if (opening) {
+        fillSetupForm(waits);
+      }
+    });
+
+    document.getElementById("setup-save").addEventListener("click", () => {
+      waits = readSetupForm();
+      saveWaits(waits);
+      fillSetupForm(waits);
+      setStatus("Delays saved", "ok");
+    });
+
+    document.getElementById("setup-defaults").addEventListener("click", () => {
+      waits = Object.assign({}, DEFAULT_WAITS);
+      saveWaits(waits);
+      fillSetupForm(waits);
+      setStatus("Defaults restored", "ok");
+    });
+  }
+
   function btn(id, html, classes = "remote-button round", title = "") {
     return `<button
       type="button"
@@ -665,8 +848,11 @@
         <section class="remote-shell" aria-label="Sky Stream remote control">
 
           <div class="device-head">
-            <i class="device-led"></i>
-            <span class="device-host">${location.hostname}</span>
+            <div class="device-title">
+              <i class="device-led"></i>
+              <span class="device-host">${location.hostname}</span>
+            </div>
+            <button type="button" id="setup-toggle" class="setup-toggle" aria-expanded="false" aria-controls="setup-panel">Setup</button>
           </div>
 
           <div id="sequence-hud" class="sequence-hud" hidden>
@@ -763,6 +949,19 @@
 
           <div id="sky-status" class="status">Ready</div>
           <div class="footer">${TV_GUIDE_FOOTER}</div>
+
+          <div id="setup-panel" class="setup-panel" hidden>
+            <p class="setup-hint">Seconds for this browser only. The ESP32 only sends IR.</p>
+            ${WAIT_FIELDS.map(field => `
+            <div class="setup-row">
+              <label for="wait-${field.key}">${field.label}</label>
+              <input id="wait-${field.key}" type="number" min="0" max="30" step="0.1" inputmode="decimal" data-wait="${field.key}" aria-label="${field.label} in seconds">
+            </div>`).join("")}
+            <div class="setup-actions">
+              <button type="button" id="setup-save">Save</button>
+              <button type="button" id="setup-defaults">Defaults</button>
+            </div>
+          </div>
         </section>
       </main>
     `;
@@ -804,6 +1003,8 @@
       }
       tuneChannel(liveTvSelect.value);
     });
+
+    bindSetup();
 
     const keyMap = {
       ArrowUp: "sky_stream_up",

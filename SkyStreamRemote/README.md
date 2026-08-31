@@ -6,7 +6,7 @@ The HTTP Sky Stream remote in this repo talks to TCP 8091. That path cannot wake
 
 ## Files
 
-- `sky_remote.js` — remote UI, styles, key clicks, keyboard, TV Guide, and Live TV channel picker.
+- `sky_remote.js` — remote UI, styles, key clicks, keyboard, TV Guide, Live TV, and per-browser delay setup.
 - `sky_remote.loader.js` / `sky_remote.boot.js` — what ESPHome’s `js_url` loads; they then fetch `sky_remote.js` from GitHub. Use `boot.js` in firmware so jsDelivr cannot keep an old cached loader.
 - `esphome/sky-stream-remote.yaml.example` — ESPHome example. Copy it into Home Assistant.
 - `SkyStreamRemote.csproj` — Rider project so these assets sit in the same solution as the player.
@@ -42,15 +42,23 @@ web_server:
 
 TV Guide is driven in `sky_remote.js` only. YAML has one IR button per key. There is no `sky_stream_tv_guide` button.
 
-The remote locks until the sequence finishes. Each item is either a press or a wait — the delay is its own step, not attached to the IR button:
+The remote locks until the sequence finishes. Each item is either a press or a wait — the delay is its own step, not attached to the IR button.
+
+Defaults (this Sky Stream box):
 
 `Home → wait 5 s → Down → wait 3 s → Down → wait 2 s → OK → wait 2 s → Back → wait 1 s → Down → wait 5 s`
 
 The footer must read `Locked during sequences`. If it does not, the browser still has an old script.
 
+## Setup (delays)
+
+**Setup** on the remote edits those waits in seconds. They are stored in `localStorage` in that browser (Home Assistant companion, Opera, etc.). The ESP32 firmware is unchanged: one IR button per key, no sequences, no macros.
+
+Save writes this browser’s overlay. Defaults restores the values above. Clearing site data forgets them. A different phone or a different HA user profile has its own copy.
+
 ## Live TV
 
-The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that Guide sequence, then the digits at 600 ms, then wait 4 s, OK, wait 1 s, OK.
+The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that Guide sequence, then the digits, a wait before OK, OK, a wait, OK. Those waits are the Setup fields for digits / after number / between OKs.
 
 ## IR transmitter (ESPHome)
 
