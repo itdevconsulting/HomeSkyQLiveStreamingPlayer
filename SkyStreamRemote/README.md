@@ -50,7 +50,7 @@ The footer must read `Locked during sequences`. If it does not, the browser stil
 
 ## Live TV
 
-The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that same locked sequence, then a 3 s bar, then the channel digits with 500 ms bars, then OK, OK.
+The dropdown uses the same channel list as the Blazor Sky Stream picker (search + category groups). Choosing a channel runs that same locked sequence, then the channel digits with 500 ms bars, then a 3 s wait, then OK, 3 s, OK.
 
 ## IR transmitter (ESPHome)
 

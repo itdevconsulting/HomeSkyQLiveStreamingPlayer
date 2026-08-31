@@ -382,16 +382,23 @@
     bar.style.transform = "scaleX(1)";
   }
 
-  function showSequenceHud(currentId, nextId, caption) {
+  function stepName(step) {
+    if (!step) {
+      return "";
+    }
+    return step.label || prettyLabel(step.id);
+  }
+
+  function showSequenceHud(nowText, nextText, caption) {
     const { hud, now, next, nextWrap, caption: captionEl } = sequenceEls();
     if (!hud) {
       return;
     }
     hud.hidden = false;
-    now.textContent = prettyLabel(currentId);
-    if (nextId) {
+    now.textContent = nowText;
+    if (nextText) {
       nextWrap.hidden = false;
-      next.textContent = prettyLabel(nextId);
+      next.textContent = nextText;
     } else {
       nextWrap.hidden = true;
       next.textContent = "";
@@ -423,7 +430,7 @@
     }
   }
 
-  async function countdownBar(ms, currentId, nextId) {
+  async function countdownBar(ms, currentName, nextName) {
     const { bar, caption: captionEl } = sequenceEls();
     const started = performance.now();
 
@@ -439,9 +446,9 @@
         bar.style.transform = "scaleX(" + (ms > 0 ? remainingMs / ms : 0) + ")";
       }
 
-      const caption = nextId
-        ? "After " + prettyLabel(currentId) + " · " + (remainingMs / 1000).toFixed(1) + "s then " + prettyLabel(nextId)
-        : "After " + prettyLabel(currentId) + " · " + (remainingMs / 1000).toFixed(1) + "s";
+      const caption = nextName
+        ? "After " + currentName + " · " + (remainingMs / 1000).toFixed(1) + "s then " + nextName
+        : "After " + currentName + " · " + (remainingMs / 1000).toFixed(1) + "s";
       if (captionEl) {
         captionEl.textContent = caption;
       }
@@ -483,14 +490,16 @@
     setUiLocked(true);
     try {
       for (let index = 0; index < steps.length; index++) {
-        const { id, gapMs } = steps[index];
-        const nextId = steps[index + 1] ? steps[index + 1].id : "";
-        showSequenceHud(id, nextId, "Sending " + prettyLabel(id));
-        setStatus("Sending " + prettyLabel(id), "", 0);
-        await sendAndWait(id);
-        if (gapMs > 0) {
-          showSequenceHud(id, nextId, "After " + prettyLabel(id));
-          await countdownBar(gapMs, id, nextId);
+        const step = steps[index];
+        const nextStep = steps[index + 1];
+        const name = stepName(step);
+        const nextName = stepName(nextStep);
+        showSequenceHud(name, nextName, "Sending " + name);
+        setStatus("Sending " + name, "", 0);
+        await sendAndWait(step.id);
+        if (step.gapMs > 0) {
+          showSequenceHud(name, nextName, "After " + name);
+          await countdownBar(step.gapMs, name, nextName);
         }
       }
       setStatus(doneMessage, "ok");
@@ -593,11 +602,14 @@
     }
 
     const steps = TV_GUIDE_STEPS.map(id => ({ id, gapMs: COMMAND_DELAY_MS }));
-    [...digits].forEach(digit => {
-      steps.push({ id: "sky_stream_" + digit, gapMs: DIGIT_DELAY_MS });
+    [...digits].forEach((digit, index, all) => {
+      steps.push({
+        id: "sky_stream_" + digit,
+        gapMs: index === all.length - 1 ? COMMAND_DELAY_MS : DIGIT_DELAY_MS
+      });
     });
-    steps.push({ id: "sky_stream_ok", gapMs: DIGIT_DELAY_MS });
-    steps.push({ id: "sky_stream_ok", gapMs: DIGIT_DELAY_MS });
+    steps.push({ id: "sky_stream_ok", gapMs: COMMAND_DELAY_MS, label: "ok 1" });
+    steps.push({ id: "sky_stream_ok", gapMs: COMMAND_DELAY_MS, label: "ok 2" });
 
     await runSequence(steps, "Live TV " + digits);
 
