@@ -2051,6 +2051,45 @@ code {
         grid-template-columns: 1fr;
     }
 }
+/* Video-only viewing stays inside the browser window. */
+.watch-restore-controls {
+    display: none;
+}
+
+body.watch-window-fill {
+    overflow: hidden;
+}
+
+.watch-window-fill .nav-shell,
+.watch-window-fill .preset-panel,
+.watch-window-fill .preset-meta {
+    display: none !important;
+}
+
+.watch-window-fill .preset-video-shell {
+    position: fixed;
+    inset: 0;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    border-radius: 0;
+    z-index: 1000;
+    background: #000;
+}
+
+.watch-window-fill .watch-restore-controls {
+    display: block;
+    position: fixed;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 1001;
+    padding: 0.5rem 0.85rem;
+    background: rgba(13, 18, 23, 0.85);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 8px;
+    cursor: pointer;
+}
     </style>
     <link rel="stylesheet" href="/H265Player.styles.css?v=@AppRelease.Current" />
     <link rel="stylesheet" href="/vendor/video-js.min.css?v=@AppRelease.Current" />

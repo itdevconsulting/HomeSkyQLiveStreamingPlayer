@@ -40,6 +40,9 @@ else
                             </span>
                         </ButtonContent>
                     </SkyQMiniRemote>
+                    <button type="button" class="preset-icon-button" @onclick="FillWindowAsync" title="Fill window with video" aria-label="Fill window with video">
+                        <span aria-hidden="true">⛶</span>
+                    </button>
                 </div>
             </div>
 
@@ -94,6 +97,7 @@ else
     else
     {
     <section class="player-panel preset-player-panel">
+        <button type="button" class="watch-restore-controls" @onclick="RestoreControlsAsync" title="Show controls (Escape)">Show controls</button>
         <div id="preset-video-shell" class="preset-video-shell">
             <div class="preset-video-frame" style="@ManagedHostStyle">
                 <StaticDomHost Id="preset-managed-host" CssClass="player-host" />
@@ -208,6 +212,10 @@ else
         _pendingAutoLoad = false;
         await GoAsync();
     }
+
+    private Task FillWindowAsync() => JS.InvokeVoidAsync("h265App.setWatchWindowFill", true).AsTask();
+
+    private Task RestoreControlsAsync() => JS.InvokeVoidAsync("h265App.setWatchWindowFill", false).AsTask();
 
     private async Task GoAsync()
     {

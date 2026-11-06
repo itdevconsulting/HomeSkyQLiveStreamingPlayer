@@ -1074,6 +1074,25 @@ window.h265App = {
         return this._watchVideo.scale;
     },
 
+    setWatchWindowFill(enabled) {
+        this._watchVideo.windowFill = enabled;
+        this.applyWatchVideoSize();
+        if (!enabled) {
+            document.querySelector(".preset-icon-group button:last-child")?.focus();
+        }
+    },
+
+    updateWatchWindowFill() {
+        const compact = window.innerWidth <= 920 || window.innerHeight <= 500;
+        if (this._watchVideo.compact !== compact) {
+            this._watchVideo.compact = compact;
+            this._watchVideo.windowFill = compact;
+        }
+        const enabled = !!document.getElementById("preset-video-shell") && !!this._watchVideo.windowFill;
+        document.body.classList.toggle("watch-window-fill", enabled);
+        return enabled;
+    },
+
     applyWatchVideoSize() {
         window.requestAnimationFrame(() => this._applyWatchVideoSizeNow());
     },
@@ -1081,6 +1100,14 @@ window.h265App = {
     _applyWatchVideoSizeNow() {
         const shell = document.getElementById("preset-video-shell");
         if (!shell) {
+            return;
+        }
+
+        const fillWindow = this.updateWatchWindowFill();
+        if (fillWindow) {
+            shell.style.width = "100%";
+            shell.style.height = "100%";
+            this.resizeManagedHost("preset-managed-host");
             return;
         }
 
@@ -1125,6 +1152,14 @@ window.h265App = {
 
         this._watchVideo.resizeHandler = () => this.applyWatchVideoSize();
         window.addEventListener("resize", this._watchVideo.resizeHandler);
+        this._watchVideo.escapeHandler = (event) => {
+            if (event.key === "Escape" && document.body.classList.contains("watch-window-fill")) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                this.setWatchWindowFill(false);
+            }
+        };
+        window.addEventListener("keydown", this._watchVideo.escapeHandler, true);
 
         if (typeof ResizeObserver === "undefined") {
             return;
@@ -1138,6 +1173,11 @@ window.h265App = {
     },
 
     releaseWatchVideoSize() {
+        document.body.classList.remove("watch-window-fill");
+        window.removeEventListener("keydown", this._watchVideo.escapeHandler, true);
+        this._watchVideo.escapeHandler = null;
+        this._watchVideo.compact = undefined;
+        this._watchVideo.windowFill = false;
         if (this._watchVideo.resizeHandler) {
             window.removeEventListener("resize", this._watchVideo.resizeHandler);
             this._watchVideo.resizeHandler = null;
