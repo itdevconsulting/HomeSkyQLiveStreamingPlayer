@@ -1528,9 +1528,24 @@ body.watch-window-fill {
     right: 0.75rem;
     z-index: 1001;
     padding: 0.5rem 0.85rem;
-    background: rgba(13, 18, 23, 0.85);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.5);
+    background: rgba(100, 100, 100, 0.22);
+    color: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 8px;
+    box-shadow: none;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
     cursor: pointer;
+    transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.watch-window-fill .watch-restore-controls:hover,
+.watch-window-fill .watch-restore-controls:focus-visible {
+    background: rgba(100, 100, 100, 0.5);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.watch-window-fill .watch-restore-controls:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.8);
+    outline-offset: 3px;
 }
